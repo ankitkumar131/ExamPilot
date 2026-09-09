@@ -4,7 +4,8 @@ name: Build installers
 
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
@@ -13,23 +14,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with:
+          node-version: 20
       - run: npm ci
       - run: npm run smoke
       - run: npx electron-builder --win --publish always
-        env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
-        with: { name: exampilot-win, path: dist/*.{exe,yml} }
+        with:
+          name: exampilot-win
+          path: |
+            dist/*.exe
+            dist/*.yml
 
   build-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with:
+          node-version: 20
       - run: npm ci
       - run: npm run smoke
       - run: npx electron-builder --linux --publish always
-        env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
-        with: { name: exampilot-linux, path: dist/*.{deb,AppImage,yml} }
+        with:
+          name: exampilot-linux
+          path: |
+            dist/*.deb
+            dist/*.AppImage
+            dist/*.yml
