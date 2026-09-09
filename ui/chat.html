@@ -85,7 +85,7 @@ bMock.onclick = async () => {
     if (mock) { typing.style.display = 'block'; typing.textContent = 'Interviewer joining…'; streamingText = ''; streamingEl = addAi('…'); }
   } catch (_) {}
 };
-if (api.onProviderAttempt) api.onProviderAttempt((a) => { if (a) typing.textContent = `Answering via ${a.provider}…`; });
+if (api.onProviderAttempt) api.onProviderAttempt((a) => { if (a && !a.stt) typing.textContent = `Answering via ${a.provider}…`; });
 if (api.onAnswerChunk) api.onAnswerChunk((c) => {
   if (!c || !streamingEl) return;
   streamingText += c.text || '';
@@ -99,7 +99,8 @@ if (api.onAnswerDone) api.onAnswerDone((r) => {
   streamingEl = null;
 });
 if (api.onAnswerError) api.onAnswerError((e) => {
-  if (!e || e.scope === 'stt') return;
+  if (!e) return;
+  if (e.scope === 'stt') { addAi('⚠️ **Transcription failed:** ' + (e.error || 'unknown STT error')); return; }
   typing.textContent = 'Error: ' + (e.error || 'failed');
   streamingEl = null;
 });

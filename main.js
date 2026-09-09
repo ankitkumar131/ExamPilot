@@ -45,6 +45,9 @@ const prompts = require('./src/prompts/templates');
 
 const logger = createServiceLogger('MAIN');
 
+// Legacy overlay Answer-button payload: never send to the LLM, redirect to transcript-derived manual answer.
+const MANUAL_ANSWER_PLACEHOLDER = '(Use the live transcript above and answer the latest question now.)';
+
 process.on('uncaughtException', (err) => logger.error('Uncaught exception (kept alive)', { error: err && err.message }));
 process.on('unhandledRejection', (reason) => logger.error('Unhandled rejection (kept alive)', { reason: String((reason && reason.message) || reason) }));
 
@@ -211,6 +214,7 @@ class ApplicationController {
     this.windows.broadcast('listening:changed', { listening: true, sources });
     this.windows.broadcast('audio:status', this.audio.status());
     logger.info('Listening started', { sources });
+    this.checkSttReady(); // fire-and-forget: loud warning if transcription cannot work
   }
 
   async stopListening() {
@@ -219,6 +223,30 @@ class ApplicationController {
     this.persistNewSegments();
     this.windows.broadcast('listening:changed', { listening: false });
     logger.info('Listening stopped');
+  }
+
+  // Pre-flight: warn LOUDLY (never silently) if transcription cannot work.
+  // Listening still starts — STT keys are read per utterance, so the user can
+  // fix Settings → Audio & Speech mid-session and the next utterance works.
+  async checkSttReady() {
+    try {
+      const order = this.stt.resolveOrder();
+      if (!order.length) {
+        this.windows.broadcast('answer:error', { scope: 'stt', error: 'No speech engines configured. Enable local Whisper or add an STT key in Settings → Audio & Speech.' });
+        return;
+      }
+      if (order.length === 1 && order[0] === 'whisper-local') {
+        const r = await checkWhisperLocal(this.store.getSttConfig('whisper-local'));
+        if (!r.ok) {
+          this.windows.broadcast('answer:error', {
+            scope: 'stt',
+            error: `Local Whisper CLI not found (${r.error || 'not on PATH'}). Transcription will fail until you install it (pip install openai-whisper + ffmpeg) or enable a cloud STT engine in Settings → Audio & Speech.`,
+          });
+        }
+      }
+    } catch (e) {
+      logger.warn('STT readiness check failed', { error: e.message });
+    }
   }
 
   setupServiceEvents() {
@@ -240,7 +268,9 @@ class ApplicationController {
     const speaker = source === 'mic' ? 'you' : 'interviewer';
     let r;
     try {
-      r = await this.stt.transcribe(wav, {});
+      r = await this.stt.transcribe(wav, {
+        onAttempt: (a) => this.windows.broadcast('provider:attempt', { ...a, stt: true }),
+      });
     } catch (e) {
       this.windows.broadcast('answer:error', { scope: 'stt', error: e.message });
       return;
@@ -258,6 +288,13 @@ class ApplicationController {
   }
 
   async runAnswer({ scope, question, context, images, task = 'answering', systemOverride, history }) {
+    const hasQ = !!(question && String(question).trim());
+    const hasCtx = !!(context && String(context).trim());
+    const hasImg = !!(images && images.length);
+    const hasHist = !!((history && history.length) || (!systemOverride && this.chatHistory.length));
+    if (!hasQ && !hasCtx && !hasImg && !hasHist) {
+      throw new Error('No transcript yet — start listening or take a screenshot first.');
+    }
     if (this.answering) {
       // Queue-bust: cancel previous and start fresh (interviews move fast).
       try { this.router.cancel(); } catch (_) {}
@@ -407,6 +444,12 @@ class ApplicationController {
     ipcMain.handle('llm:ask', async (_e, { text, scope }) => {
       const q = String(text || '').trim();
       if (!q) return fail(new Error('Empty message'));
+      if (q === MANUAL_ANSWER_PLACEHOLDER) {
+        // Legacy overlay button payload — answer from the live transcript instead
+        // of sending placeholder text to the LLM. Never enters chat history.
+        await this.flowManualAnswer();
+        return ok({ manual: true });
+      }
       this.chatHistory.push({ role: 'user', text: q });
       if (this.mockMode) {
         const ctx = this.sessionContext();
@@ -426,6 +469,7 @@ class ApplicationController {
       return ok({ provider: r.provider });
     });
     ipcMain.handle('llm:cancel', () => { try { this.router.cancel(); } catch (_) {} return ok({}); });
+    ipcMain.handle('llm:manual-answer', async () => { await this.flowManualAnswer(); return ok({}); });
     ipcMain.handle('llm:auto-answer', (_e, on) => {
       this.transcript.setAutoAnswer(on);
       this.store.set('audio.autoAnswer', !!on);

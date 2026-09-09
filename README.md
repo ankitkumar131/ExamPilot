@@ -213,7 +213,7 @@ First launch opens the **onboarding wizard**: pick a provider, paste a key, Test
 git clone https://github.com/ankitkumar131/exam.git
 cd exam
 npm install
-npm run smoke     # self-test: 12 checks, no keys needed
+npm run smoke     # self-test: 15 checks, no keys needed
 npm start         # launch (dev: npm run dev)
 ```
 
@@ -312,7 +312,7 @@ src/services/notes.service.js   post-call AI notes
 src/prompts/templates.js        12 interview modes + mock interviewer
 src/managers/                   stealth windows + global shortcuts
 ui/                             overlay, response, chat, sessions, settings, onboarding
-scripts/smoke.js                12-check self-test (works with zero deps installed)
+scripts/smoke.js                15-check self-test (works with zero deps installed)
 ```
 
 ---
@@ -327,6 +327,7 @@ scripts/smoke.js                12-check self-test (works with zero deps install
 | No system audio (macOS) | OS limitation — use mic, or play call on speakers |
 | `All AI providers failed` | Settings → Providers: enable ≥1, Test keys; check order in Fallback tab |
 | Whisper CLI not found | `pip install openai-whisper` (+ffmpeg), or use a cloud STT engine |
+| Listen shows no transcript / AI says "no question provided" | Transcription is failing — the overlay now shows the exact cause. Usually: install Whisper (above) or add a cloud STT key in Settings → Audio & Speech |
 | Overlay lost / behind windows | `Ctrl+Shift+T` re-pins always-on-top; `Ctrl+Shift+H` toggles visibility |
 | Blank/transparent window on Linux | App already forces software rendering; update GPU drivers if it persists |
 

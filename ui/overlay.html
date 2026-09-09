@@ -64,10 +64,10 @@ LANGS.forEach((v) => { const o = document.createElement('option'); o.value = v; 
 let listening = false, autoAnswer = true, panelOpen = false;
 const linesEl = $('lines'), statusText = $('statusText'), provEl = $('prov'), errEl = $('err'), dot = $('dot');
 
-function setErr(msg) {
+function setErr(msg, sticky) {
   if (!msg) { errEl.style.display = 'none'; errEl.textContent = ''; return; }
   errEl.style.display = 'block'; errEl.textContent = msg;
-  clearTimeout(setErr._t); setErr._t = setTimeout(() => setErr(''), 8000);
+  clearTimeout(setErr._t); setErr._t = setTimeout(() => setErr(''), sticky ? 25000 : 8000);
 }
 function setStatus(t, mode) {
   statusText.textContent = t;
@@ -129,7 +129,11 @@ async function attachCapture(stream, source) {
   const node = new AudioWorkletNode(ctx, 'exampilot-cap', { numberOfInputs: 1, numberOfOutputs: 0 });
   node.port.onmessage = (ev) => {
     try {
-      const pcm = resampleTo16k(ev.data.samples, ev.data.rate || ctx.sampleRate);
+      const samples = ev.data.samples || [];
+      let peak = 0;
+      for (let i = 0; i < samples.length; i += 10) { const a = Math.abs(samples[i]); if (a > peak) peak = a; }
+      if (peak > 0.03) pulseHeard();
+      const pcm = resampleTo16k(samples, ev.data.rate || ctx.sampleRate);
       api.sendPcm(source, b64encode(new Uint8Array(pcm.buffer)));
     } catch (_) {}
   };
@@ -188,6 +192,14 @@ async function toggleListen() {
     listening = false; paintListen(); setStatus('Stopped.', '');
   }
 }
+let heardTimer = null;
+function pulseHeard() {
+  try {
+    dot.style.transform = 'scale(1.6)';
+    clearTimeout(heardTimer);
+    heardTimer = setTimeout(() => { dot.style.transform = ''; }, 250);
+  } catch (_) {}
+}
 function paintListen() {
   $('bRec').classList.toggle('on', listening);
   $('bRec').textContent = listening ? '■ Stop' : '● Listen';
@@ -196,7 +208,7 @@ async function saveModeLang() {
   try { await api.settingsSave({ sessionDefaults: { mode: modeSel.value, language: langSel.value } }); } catch (_) {}
 }
 $('bRec').onclick = toggleListen;
-$('bAnswer').onclick = async () => { setErr(''); try { await api.windowShow('response'); await api.llmAsk({ text: '(Use the live transcript above and answer the latest question now.)', scope: 'manual' }); } catch (e) { setErr(e.message); } };
+$('bAnswer').onclick = async () => { setErr(''); try { await api.windowShow('response'); await api.llmManualAnswer(); } catch (e) { setErr(e.message); } };
 $('bShot').onclick = () => { setErr(''); api.captureFullscreen().catch((e) => setErr(e.message)); };
 $('bChat').onclick = () => api.windowShow('chat');
 $('bSess').onclick = () => api.windowShow('sessions');
@@ -214,9 +226,22 @@ langSel.onchange = saveModeLang;
 // ---------- events ----------
 if (api.onTranscriptSegment) api.onTranscriptSegment((seg) => { if (seg) { addLine(seg); if (!panelOpen) setPanel(true); } });
 if (api.onAnswerStart) api.onAnswerStart(() => setStatus('Thinking…', 'busy'));
-if (api.onProviderAttempt) api.onProviderAttempt((a) => { if (a) { provEl.textContent = `${a.provider} · ${a.model || ''}`; setStatus(`Answering via ${a.provider}…`, 'busy'); } });
+if (api.onProviderAttempt) api.onProviderAttempt((a) => {
+  if (!a) return;
+  if (a.stt) { setStatus(`Transcribing via ${a.provider}…`, 'busy'); return; }
+  provEl.textContent = `${a.provider} · ${a.model || ''}`; setStatus(`Answering via ${a.provider}…`, 'busy');
+});
 if (api.onAnswerDone) api.onAnswerDone((r) => { if (r && r.provider) { provEl.textContent = `${r.provider} · ${r.model || ''}`; setStatus(listening ? 'Listening…' : 'Done.', listening ? 'live' : ''); } });
-if (api.onAnswerError) api.onAnswerError((e) => { if (e && e.scope !== 'stt') { setErr(e.error || 'Answer failed'); setStatus(listening ? 'Listening…' : 'Idle.', listening ? 'live' : ''); } });
+if (api.onAnswerError) api.onAnswerError((e) => {
+  if (!e) return;
+  if (e.scope === 'stt') {
+    setErr('Transcription failed: ' + (e.error || 'unknown STT error'), true);
+    setStatus(listening ? 'Listening — transcription failing, see error.' : 'Idle.', listening ? 'live' : '');
+    setPanel(true);
+    return;
+  }
+  setErr(e.error || 'Answer failed'); setStatus(listening ? 'Listening…' : 'Idle.', listening ? 'live' : '');
+});
 if (api.onListeningChanged) api.onListeningChanged((s) => { if (s && typeof s.listening === 'boolean' && s.listening !== listening && api.isDemo) { listening = s.listening; paintListen(); } });
 
 // ---------- init ----------

@@ -211,7 +211,11 @@ class STTRouter {
         this.log.warn('STT engine failed, falling back', { provider: id, error: String(e.message || e) });
       }
     }
-    throw new Error(`All speech engines failed. Last error: ${lastErr ? lastErr.message : 'unknown'}`);
+    const lastMsg = lastErr ? lastErr.message : 'unknown';
+    const hint = /ENOENT|not found|spawn|whisper/i.test(lastMsg)
+      ? ' Install it with: pip install openai-whisper (+ ffmpeg on PATH), or enable a cloud engine in Settings → Audio & Speech.'
+      : ' Check Settings → Audio & Speech (keys, order, availability).';
+    throw new Error(`All speech engines failed. Last error: ${lastMsg}.${hint}`);
   }
 }
 

@@ -188,6 +188,46 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     assert(n.summary.includes('great') && n.questions.length === 1 && n.nextSteps.length === 1, 'sections');
   });
 
+  await t('STT empty chain error is actionable', async () => {
+    const { Store } = require('../src/core/store');
+    const { STTRouter } = require('../src/services/stt');
+    const store = new Store(process.env.EXAMPILOT_DATA_DIR);
+    store.update({ stt: { order: ['whisper-local', 'deepgram'], whisperLocal: { enabled: false }, deepgram: { enabled: false, apiKey: '' } } });
+    const r = new STTRouter({ store });
+    assert(r.resolveOrder().length === 0, 'disabled engines filtered');
+    let msg = '';
+    try { await r.transcribe(Buffer.alloc(3200), {}); } catch (e) { msg = e.message; }
+    assert(/No speech engines configured/.test(msg) && /Settings/.test(msg), 'actionable: ' + msg);
+  });
+
+  await t('STT total failure names the whisper fix', async () => {
+    const { Store } = require('../src/core/store');
+    const { STTRouter } = require('../src/services/stt');
+    const store = new Store(process.env.EXAMPILOT_DATA_DIR);
+    store.update({ stt: { order: ['whisper-local'], whisperLocal: { enabled: true, command: 'definitely-not-a-real-binary-xyz', model: 'tiny' } } });
+    const r = new STTRouter({ store });
+    assert(r.resolveOrder().join() === 'whisper-local', 'whisper in order');
+    let msg = '';
+    try { await r.transcribe(Buffer.alloc(3200), {}); } catch (e) { msg = e.message; }
+    assert(/All speech engines failed/.test(msg) && /pip install openai-whisper/.test(msg), 'actionable: ' + msg);
+  });
+
+  await t('manual-answer path wired, placeholder never reaches LLM', () => {
+    const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+    const preload = fs.readFileSync(path.join(ROOT, 'preload.js'), 'utf8');
+    const overlay = fs.readFileSync(path.join(ROOT, 'ui/overlay.html'), 'utf8');
+    const chat = fs.readFileSync(path.join(ROOT, 'ui/chat.html'), 'utf8');
+    assert(main.includes("ipcMain.handle('llm:manual-answer'"), 'main handles llm:manual-answer');
+    assert(main.includes('MANUAL_ANSWER_PLACEHOLDER'), 'legacy placeholder redirect in llm:ask');
+    assert(main.includes('checkSttReady'), 'STT pre-flight on listen start');
+    assert(main.includes('No transcript yet — start listening'), 'empty-transcript guard');
+    assert(preload.includes("'llm:manual-answer'"), 'preload exposes llm:manual-answer');
+    assert(overlay.includes('api.llmManualAnswer()'), 'overlay button uses manual path');
+    assert(!overlay.includes("llmAsk({ text: '(Use the live transcript"), 'placeholder question removed from overlay');
+    assert(overlay.includes('Transcription failed'), 'overlay surfaces STT errors');
+    assert(chat.includes('Transcription failed'), 'chat surfaces STT errors');
+  });
+
   await t('required files exist', () => {
     const files = [
       'main.js', 'preload.js', 'package.json',

@@ -8,7 +8,7 @@ const INVOKE = [
   'capture:list-displays', 'capture:fullscreen',
   'document:parse-pdf',
   'vision:analyze-last',
-  'llm:ask', 'llm:cancel', 'llm:auto-answer', 'llm:mock',
+  'llm:ask', 'llm:cancel', 'llm:auto-answer', 'llm:mock', 'llm:manual-answer',
   'transcript:get', 'transcript:clear',
   'session:list', 'session:create', 'session:end', 'session:get',
   'session:remove', 'session:active', 'session:update',

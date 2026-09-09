@@ -75,7 +75,7 @@ if (api.onAnswerStart) api.onAnswerStart(() => {
   badge.textContent = '…';
 });
 if (api.onProviderAttempt) api.onProviderAttempt((a) => {
-  if (!a) return;
+  if (!a || a.stt) return; // STT progress shows in the overlay; this window only covers answers.
   loading.style.display = 'block';
   loadingText.textContent = `Answering via ${a.provider} (${a.model || ''})…`;
   badge.textContent = `${a.provider}`;

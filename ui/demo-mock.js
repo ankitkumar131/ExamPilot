@@ -48,7 +48,7 @@
     captureListDisplays: () => ok({ displays: [] }), captureFullscreen: () => ok({}),
     documentParsePdf: () => ok({ text: '[Demo] Parsed PDF text would appear here. Run the desktop app for real parsing.', pages: 2 }),
     visionAnalyzeLast: () => ok({}),
-    llmAsk: () => ok({ provider: 'groq' }), llmCancel: () => ok({}), llmAutoAnswer: (on) => ok({ autoAnswer: on !== false }), llmMock: () => ok({ mockMode: false }),
+    llmAsk: () => ok({ provider: 'groq' }), llmManualAnswer: () => ok({ manual: true }), llmCancel: () => ok({}), llmAutoAnswer: (on) => ok({ autoAnswer: on !== false }), llmMock: () => ok({ mockMode: false }),
     transcriptGet: () => ok({ segments: [
       { id: 'd1', ts: Date.now() - 90000, speaker: 'interviewer', text: 'How would you design a rate limiter for a public API?', provider: 'deepgram' },
       { id: 'd2', ts: Date.now() - 60000, speaker: 'you', text: 'I would start with a token bucket per API key in Redis.', provider: 'deepgram' },
