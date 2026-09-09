@@ -1,0 +1,33 @@
+# Packaged builds (.exe / .deb) — used later; code-first for now.
+# Triggers on version tags (v0.1.0) or manual dispatch.
+name: Build installers
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build-win:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci
+      - run: npm run smoke
+      - run: npm run build:win
+      - uses: actions/upload-artifact@v4
+        with: { name: exampilot-win, path: dist/*.{exe,yml} }
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci
+      - run: npm run smoke
+      - run: npm run build:linux
+      - uses: actions/upload-artifact@v4
+        with: { name: exampilot-linux, path: dist/*.{deb,AppImage,yml} }

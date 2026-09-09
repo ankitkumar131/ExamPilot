@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>AI Response</title>
+<script src="./demo-mock.js"></script>
+<script src="./markdown.js"></script>
+<style>
+  html, body { margin: 0; background: transparent; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  #win { -webkit-app-region: drag; background: rgba(13,16,24,.94); border: 1px solid #2c3549; border-radius: 14px;
+    color: #e6e9f0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; backdrop-filter: blur(14px); }
+  #bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #232b3d; }
+  button, select { -webkit-app-region: no-drag; }
+  button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 8px; font-size: 12px; padding: 5px 10px; cursor: pointer; }
+  button:hover { border-color: #7c3aed; }
+  #title { font-size: 13px; font-weight: 700; }
+  #badge { font-size: 11.5px; color: #c4b5fd; background: rgba(124,58,237,.15); border: 1px solid rgba(124,58,237,.4);
+    padding: 3px 10px; border-radius: 20px; margin-left: auto; white-space: nowrap; }
+  #hops { font-size: 11.5px; color: #9aa3b2; padding: 6px 14px 0; display: none; }
+  #body { padding: 12px 16px 20px; overflow-y: auto; font-size: 14px; line-height: 1.6; flex: 1; -webkit-app-region: no-drag; }
+  #body p { margin: 8px 0; } #body h1 { font-size: 18px; } #body h2 { font-size: 16px; } #body h3, #body h4 { font-size: 14px; }
+  .md-inline { background: #1c2230; padding: 1px 6px; border-radius: 6px; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+  .md-ul, .md-ol { margin: 8px 0; padding-left: 22px; } .md-ul li, .md-ol li { margin: 4px 0; }
+  .md-code { background: #0d1117; border: 1px solid #2c3549; border-radius: 10px; margin: 10px 0; overflow: hidden; }
+  .md-code-head { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: #161c28; font-size: 11.5px; color: #9aa3b2; }
+  .md-code pre { margin: 0; padding: 12px; overflow-x: auto; font-size: 12.5px; }
+  .md-copy { font-size: 11px; padding: 3px 8px; }
+  .cursor::after { content: '▍'; color: #7c3aed; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  #loading { display: none; padding: 20px; color: #9aa3b2; font-size: 13px; }
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid #7c3aed; border-top-color: transparent; border-radius: 50%; animation: sp 0.8s linear infinite; margin-right: 8px; vertical-align: -2px; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  #err { display: none; margin: 10px 14px; padding: 10px 12px; background: rgba(220,38,38,.12); border: 1px solid rgba(220,38,38,.4); border-radius: 10px; color: #fca5a5; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div id="win">
+  <div id="bar">
+    <span id="title">✦ Answer</span>
+    <span id="badge">idle</span>
+    <button id="bCopy">Copy</button>
+    <button id="bClear">Clear</button>
+    <button id="bPin">Hide</button>
+  </div>
+  <div id="hops"></div>
+  <div id="loading"><span class="spin"></span><span id="loadingText">Thinking…</span></div>
+  <div id="err"></div>
+  <div id="body"><p style="color:#525b70">Answers stream here while you talk. Press <b>Answer</b> or wait for Auto-Answer.</p></div>
+</div>
+<script>
+const api = window.electronAPI || window.DemoMock;
+const body = document.getElementById('body'), badge = document.getElementById('badge'),
+  loading = document.getElementById('loading'), loadingText = document.getElementById('loadingText'),
+  errBox = document.getElementById('err'), hops = document.getElementById('hops');
+let full = '', hopsList = [];
+function paint() {
+  body.innerHTML = renderMarkdown(full);
+  body.classList.add('cursor');
+  body.scrollTop = body.scrollHeight;
+}
+function showErr(msg, attempts) {
+  loading.style.display = 'none';
+  errBox.style.display = 'block';
+  errBox.innerHTML = `<b>Failed.</b> ${String(msg || '').replace(/</g, '&lt;')}` +
+    (attempts && attempts.length ? `<br><span style="opacity:.8">Tried: ${attempts.map((a) => `${a.provider}${a.ok ? '✓' : '✗'}`).join(' → ')}</span>` : '');
+  badge.textContent = 'error';
+}
+function reset() { full = ''; hopsList = []; hops.style.display = 'none'; errBox.style.display = 'none'; }
+document.getElementById('bCopy').onclick = () => { if (api.clipboardCopy) api.clipboardCopy(full); };
+document.getElementById('bClear').onclick = () => { reset(); body.innerHTML = ''; badge.textContent = 'idle'; };
+document.getElementById('bPin').onclick = () => api.windowHide('response');
+if (api.onAnswerStart) api.onAnswerStart(() => {
+  reset(); body.classList.add('cursor');
+  loading.style.display = 'block'; loadingText.textContent = 'Thinking…';
+  badge.textContent = '…';
+});
+if (api.onProviderAttempt) api.onProviderAttempt((a) => {
+  if (!a) return;
+  loading.style.display = 'block';
+  loadingText.textContent = `Answering via ${a.provider} (${a.model || ''})…`;
+  badge.textContent = `${a.provider}`;
+  hopsList.push(a.provider);
+  if (hopsList.length > 1) { hops.style.display = 'block'; hops.textContent = 'Fallback chain: ' + hopsList.join(' → '); }
+});
+if (api.onAnswerChunk) api.onAnswerChunk((c) => {
+  if (!c) return;
+  loading.style.display = 'none';
+  full += c.text || '';
+  paint();
+});
+if (api.onAnswerDone) api.onAnswerDone((r) => {
+  loading.style.display = 'none'; body.classList.remove('cursor');
+  if (r && r.attempts && r.attempts.length > 1) {
+    hops.style.display = 'block';
+    hops.textContent = 'Fallback chain: ' + r.attempts.map((a) => `${a.provider}${a.ok ? '✓' : '✗'}`).join(' → ');
+  }
+  if (r && r.provider) badge.textContent = `${r.provider} · ${r.model || ''}`;
+});
+if (api.onAnswerError) api.onAnswerError((e) => { if (e && e.scope === 'stt') return; body.classList.remove('cursor'); showErr(e && e.error, e && e.attempts); });
+if (api.isDemo) {
+  badge.textContent = 'groq · llama-3.3-70b-versatile';
+  full = '## Token-bucket rate limiter\n\n**Direct answer:** keep a per-key token bucket in Redis, refill on a fixed interval, reject at zero tokens with `429 + Retry-After`.\n\n- **Burst:** bucket size = max burst; refill rate = sustained RPS.\n- **Distributed:** single Lua script does refill + consume atomically.\n\n```python\ndef allow(key, capacity, refill_per_s):\n    ...\n```\n\n**Complexity:** O(1) per request, O(keys) memory.';
+  paint(); body.classList.remove('cursor');
+}
+</script>
+</body>
+</html>

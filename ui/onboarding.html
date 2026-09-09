@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Welcome to ExamPilot</title>
+<script src="./demo-mock.js"></script>
+<style>
+  html, body { margin: 0; background: transparent; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  #win { background: rgba(13,16,24,.97); border: 1px solid rgba(124,58,237,.5); border-radius: 16px; color: #e6e9f0;
+    height: 100vh; box-sizing: border-box; padding: 28px; overflow-y: auto; backdrop-filter: blur(14px); -webkit-app-region: drag; }
+  input, select, button { -webkit-app-region: no-drag; }
+  h1 { font-size: 22px; margin: 0 0 4px; } h1 span { color: #a78bfa; }
+  p.sub { color: #9aa3b2; font-size: 13.5px; margin: 0 0 20px; }
+  .step { background: #151b28; border: 1px solid #232b3d; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+  .step h3 { margin: 0 0 8px; font-size: 14px; }
+  .step p { margin: 0 0 10px; font-size: 12.5px; color: #9aa3b2; }
+  select, input { background: #0d1117; border: 1px solid #2c3549; border-radius: 8px; color: #e6e9f0; font-size: 13px; padding: 8px 10px; }
+  .row { display: flex; gap: 8px; } .row input { flex: 1; }
+  button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 8px; font-size: 13px; padding: 8px 14px; cursor: pointer; }
+  button:hover { border-color: #7c3aed; }
+  button.primary { background: #7c3aed; border-color: #7c3aed; font-weight: 600; }
+  button:disabled { opacity: .5; }
+  #bFinish { width: 100%; margin-top: 4px; padding: 12px; font-size: 14px; }
+  .ok { color: #4ade80; font-size: 12.5px; } .bad { color: #fca5a5; font-size: 12.5px; }
+  kbd { background: #1c2230; border: 1px solid #2c3549; border-radius: 6px; padding: 1px 7px; font-size: 11.5px; font-family: ui-monospace, monospace; }
+  table { width: 100%; font-size: 12.5px; border-collapse: collapse; }
+  td { padding: 5px 4px; border-top: 1px solid #1c2230; color: #cfd5e1; }
+</style>
+</head>
+<body>
+<div id="win">
+  <h1>Welcome to <span>ExamPilot</span></h1>
+  <p class="sub">Your invisible interview copilot. Three quick steps and you're live.</p>
+  <div class="step">
+    <h3>1 · Connect an AI provider</h3>
+    <p>Pick one to start (free options: Gemini, Groq). Add more later in Settings for automatic fallback.</p>
+    <div class="row" style="margin-bottom:8px">
+      <select id="prov">
+        <option value="gemini">Google Gemini</option>
+        <option value="groq">Groq</option>
+        <option value="openai">OpenAI</option>
+        <option value="anthropic">Anthropic</option>
+        <option value="deepseek">DeepSeek</option>
+        <option value="mistral">Mistral</option>
+        <option value="together">Together AI</option>
+        <option value="openrouter">OpenRouter</option>
+        <option value="ollama">Ollama (local, no key)</option>
+      </select>
+      <button id="bKeyLink">Get free key ↗</button>
+    </div>
+    <div class="row">
+      <input id="key" type="password" placeholder="Paste API key…" autocomplete="off"/>
+      <button id="bTest">Test</button>
+    </div>
+    <p id="testRes" style="margin:8px 0 0"></p>
+  </div>
+  <div class="step">
+    <h3>2 · How it works</h3>
+    <table>
+      <tr><td><kbd>● Listen</kbd></td><td>Hears your mic + call audio, transcribes live</td></tr>
+      <tr><td><kbd>Auto</kbd></td><td>Detects questions and answers by itself</td></tr>
+      <tr><td><kbd>◧ Shot</kbd></td><td>Screenshot any question/code → instant solution</td></tr>
+      <tr><td><kbd>Ctrl+Shift+H</kbd></td><td>Panic key: hide everything instantly</td></tr>
+    </table>
+  </div>
+  <div class="step">
+    <h3>3 · Stay invisible</h3>
+    <p>Stealth is ON: ExamPilot hides from Meet / Zoom / Teams screen-shares, the taskbar and the dock. Turn it off in Settings for practice.</p>
+  </div>
+  <button id="bFinish" class="primary" disabled>Finish setup →</button>
+</div>
+<script>
+const api = window.electronAPI || window.DemoMock;
+const KEY_URLS = { gemini: 'https://aistudio.google.com/', groq: 'https://console.groq.com/keys', openai: 'https://platform.openai.com/api-keys', anthropic: 'https://console.anthropic.com/', deepseek: 'https://platform.deepseek.com/', mistral: 'https://console.mistral.ai/', together: 'https://api.together.xyz/', openrouter: 'https://openrouter.ai/keys', ollama: 'https://ollama.com/' };
+const prov = document.getElementById('prov'), key = document.getElementById('key'),
+  testRes = document.getElementById('testRes'), bFinish = document.getElementById('bFinish');
+let testedOk = false;
+document.getElementById('bKeyLink').onclick = () => api.shellOpenExternal(KEY_URLS[prov.value]);
+prov.onchange = () => {
+  testedOk = false; bFinish.disabled = true; testRes.textContent = '';
+  key.style.display = prov.value === 'ollama' ? 'none' : 'block';
+  if (prov.value === 'ollama') { testedOk = true; bFinish.disabled = false; testRes.innerHTML = '<span class="ok">Local mode — no key needed. Make sure `ollama serve` is running.</span>'; }
+};
+document.getElementById('bTest').onclick = async () => {
+  testRes.innerHTML = 'testing…';
+  try {
+    await api.settingsSave({ providers: { [prov.value]: { enabled: true, apiKey: key.value } } });
+    const r = await api.providersTest({ id: prov.value, config: {} });
+    testRes.innerHTML = `<span class="ok">✓ Connected (${(r.text || 'OK').slice(0, 30)}). You can finish setup.</span>`;
+    testedOk = true; bFinish.disabled = false;
+  } catch (e) { testRes.innerHTML = `<span class="bad">✗ ${e.message.slice(0, 160)}</span>`; }
+};
+bFinish.onclick = async () => { await api.onboardingComplete(); };
+if (api.isDemo) { testedOk = true; bFinish.disabled = false; }
+</script>
+</body>
+</html>

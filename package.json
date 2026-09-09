@@ -1,0 +1,91 @@
+{
+  "name": "exampilot",
+  "version": "0.1.0",
+  "description": "ExamPilot — invisible real-time interview copilot. Listens to mic + system audio, captures screen, answers with your AI providers + automatic fallback.",
+  "main": "main.js",
+  "author": "ExamPilot",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "env -u ELECTRON_RUN_AS_NODE electron .",
+    "dev": "env -u ELECTRON_RUN_AS_NODE electron . --no-sandbox --disable-gpu",
+    "smoke": "node scripts/smoke.js",
+    "test": "node scripts/smoke.js",
+    "clean": "rm -rf dist/",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
+    "build:mac": "electron-builder --mac",
+    "rebuild": "npm run clean && npm run build"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "winston": "^3.13.0",
+    "winston-daily-rotate-file": "^5.0.0"
+  },
+  "devDependencies": {
+    "electron": "^29.4.6",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.exampilot.app",
+    "productName": "ExamPilot",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!dist/**/*",
+      "!*.md",
+      "!.git/**/*",
+      "!.github/**/*",
+      "!.env*",
+      "!coverage/**/*"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "sign": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "ExamPilot"
+    },
+    "linux": {
+      "target": [
+        { "target": "deb", "arch": ["x64"] },
+        { "target": "AppImage", "arch": ["x64"] }
+      ],
+      "category": "Utility",
+      "maintainer": "ExamPilot",
+      "description": "Invisible real-time interview copilot with multi-provider AI fallback."
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0"
+      ]
+    },
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }, { "target": "zip", "arch": ["x64", "arm64"] }]
+    },
+    "publish": {
+      "provider": "github"
+    }
+  }
+}

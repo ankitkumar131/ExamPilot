@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Sessions</title>
+<script src="./demo-mock.js"></script>
+<script src="./markdown.js"></script>
+<style>
+  html, body { margin: 0; background: transparent; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  #win { -webkit-app-region: drag; background: rgba(13,16,24,.96); border: 1px solid #2c3549; border-radius: 14px;
+    color: #e6e9f0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; backdrop-filter: blur(14px); }
+  button, input, select, textarea { -webkit-app-region: no-drag; }
+  #bar { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid #232b3d; }
+  #bar h1 { font-size: 15px; margin: 0; }
+  button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 8px; font-size: 12.5px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: #7c3aed; }
+  button.primary { background: #7c3aed; border-color: #7c3aed; }
+  input, select, textarea { background: #0d1117; border: 1px solid #2c3549; border-radius: 8px; color: #e6e9f0; font-size: 12.5px; padding: 6px 10px; }
+  #search { margin-left: auto; width: 200px; }
+  #main { flex: 1; display: flex; min-height: 0; }
+  #list { width: 340px; border-right: 1px solid #232b3d; overflow-y: auto; -webkit-app-region: no-drag; }
+  .row { padding: 12px 14px; border-bottom: 1px solid #1c2230; cursor: pointer; }
+  .row:hover, .row.sel { background: #181e2c; }
+  .row .t { font-size: 13px; font-weight: 600; }
+  .row .m { font-size: 11.5px; color: #9aa3b2; margin-top: 3px; }
+  .pill { display: inline-block; font-size: 10.5px; padding: 1px 8px; border-radius: 12px; margin-left: 6px; vertical-align: 1px; }
+  .pill.live { background: rgba(34,197,94,.15); color: #4ade80; border: 1px solid rgba(34,197,94,.4); }
+  .pill.ended { background: rgba(82,91,112,.2); color: #9aa3b2; border: 1px solid #2c3549; }
+  #detail { flex: 1; overflow-y: auto; padding: 16px 18px; -webkit-app-region: no-drag; }
+  #detail h2 { font-size: 16px; margin: 0 0 4px; }
+  #detail .meta { font-size: 12px; color: #9aa3b2; margin-bottom: 12px; }
+  .tabs { display: flex; gap: 6px; margin: 12px 0; }
+  .tabs button.on { background: #7c3aed; border-color: #7c3aed; }
+  #transcript .line { font-size: 13px; margin: 6px 0; line-height: 1.5; }
+  #transcript b.you { color: #7dd3fc; } #transcript b.iv { color: #f0abfc; }
+  #notes { font-size: 13.5px; line-height: 1.6; }
+  #notes p { margin: 6px 0; }
+  #newForm { display: none; padding: 14px; border-bottom: 1px solid #232b3d; background: #121722; -webkit-app-region: no-drag; }
+  #newForm .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+  #newForm textarea { grid-column: 1 / -1; min-height: 44px; resize: vertical; }
+  .rowBtns { display: flex; gap: 8px; }
+</style>
+</head>
+<body>
+<div id="win">
+  <div id="bar">
+    <h1>🗂 Call Sessions</h1>
+    <button id="bNew" class="primary">+ New session</button>
+    <select id="fState"><option value="all">All</option><option value="live">Live</option><option value="ended">Ended</option></select>
+    <input id="search" placeholder="Search title / company…"/>
+    <button id="bHide">Hide</button>
+  </div>
+  <div id="newForm">
+    <div class="grid">
+      <input id="nCompany" placeholder="Company (e.g. Acme)"/>
+      <input id="nRole" placeholder="Role (e.g. Backend Engineer)"/>
+      <select id="nMode"></select>
+      <select id="nLang"></select>
+      <textarea id="nResume" placeholder="Resume (optional — pasted text, used for answers)"></textarea>
+      <textarea id="nJd" placeholder="Job description (optional)"></textarea>
+    </div>
+    <div class="rowBtns">
+      <button id="bCreate" class="primary">Start live session</button>
+      <button id="bCancelNew">Cancel</button>
+      <label style="font-size:12px;color:#9aa3b2;display:flex;align-items:center;gap:6px;margin-left:auto"><input type="checkbox" id="nSave" checked/> Save transcript</label>
+    </div>
+  </div>
+  <div id="main">
+    <div id="list"></div>
+    <div id="detail"><p style="color:#525b70">Select a session to view its transcript and AI notes.</p></div>
+  </div>
+</div>
+<script>
+const api = window.electronAPI || window.DemoMock;
+const MODES = [['auto','Auto-detect'],['dsa','DSA / LeetCode'],['coding','General Coding'],['frontend','Frontend'],['backend','Backend / APIs'],['system-design','System Design'],['behavioral','Behavioral / HR'],['devops','DevOps / SRE'],['data-science','Data / ML'],['product','Product / PM'],['general','General / Sales'],['custom','Custom']];
+const LANGS = ['python','javascript','typescript','cpp','c','java','go','rust','csharp','kotlin','swift','sql'];
+const nMode = document.getElementById('nMode'), nLang = document.getElementById('nLang');
+MODES.forEach(([v, l]) => { const o = document.createElement('option'); o.value = v; o.textContent = l; nMode.appendChild(o); });
+LANGS.forEach((v) => { const o = document.createElement('option'); o.value = v; o.textContent = v; nLang.appendChild(o); });
+
+const listEl = document.getElementById('list'), detail = document.getElementById('detail');
+let sessions = [], selected = null, tab = 'transcript';
+
+function fmtDur(s) {
+  if (!s) return '—';
+  const m = Math.floor(s / 60), sec = s % 60;
+  return `${m}m ${sec}s`;
+}
+function fmtDate(ts) {
+  try { return new Date(ts).toLocaleString(); } catch (_) { return ''; }
+}
+async function refresh() {
+  const q = document.getElementById('search').value;
+  const state = document.getElementById('fState').value;
+  const r = await api.sessionList({ q, state });
+  sessions = r.sessions || [];
+  paintList();
+}
+function paintList() {
+  listEl.innerHTML = '';
+  if (!sessions.length) { listEl.innerHTML = '<p style="padding:14px;color:#525b70;font-size:13px">No sessions yet.</p>'; return; }
+  sessions.forEach((s) => {
+    const d = document.createElement('div');
+    d.className = 'row' + (selected === s.id ? ' sel' : '');
+    d.innerHTML = `<div class="t">${String(s.title || 'Untitled').replace(/</g, '&lt;')}<span class="pill ${s.state}">${s.state}</span></div>` +
+      `<div class="m">${s.mode || ''} · ${s.segmentCount || 0} msgs · ${s.state === 'live' ? 'live now' : fmtDur(s.durationSec)} · ${fmtDate(s.createdAt)}</div>`;
+    d.onclick = () => { selected = s.id; tab = 'transcript'; paintList(); showDetail(); };
+    listEl.appendChild(d);
+  });
+}
+async function showDetail() {
+  const r = await api.sessionGet(selected);
+  const s = r.session;
+  if (!s) { detail.innerHTML = '<p>Gone.</p>'; return; }
+  const notes = s.notes ? `<div id="notes">${renderMarkdown(s.notes.raw || '')}</div>` : '<p style="color:#525b70">No notes yet — they are generated when the session ends.</p>';
+  const tr = (s.transcript || []).map((g) =>
+    `<div class="line"><b class="${g.speaker === 'you' ? 'you' : 'iv'}">${g.speaker === 'you' ? 'You' : 'Q'}:</b> ${String(g.text || '').replace(/</g, '&lt;')}</div>`
+  ).join('') || '<p style="color:#525b70">No transcript saved.</p>';
+  detail.innerHTML = `<h2>${String(s.title || '').replace(/</g, '&lt;')}</h2>
+    <div class="meta">${s.company || ''} · ${s.role || ''} · mode ${s.mode || ''} · ${s.state === 'live' ? 'LIVE' : fmtDur(s.durationSec) + ' · ' + fmtDate(s.endedAt || s.createdAt)}</div>
+    <div class="rowBtns">
+      ${s.state === 'live' ? '<button id="bEnd" class="primary">End + generate notes</button>' : ''}
+      <button id="bDel">Delete</button>
+    </div>
+    <div class="tabs"><button id="tT" class="${tab === 'transcript' ? 'on' : ''}">Transcript</button><button id="tN" class="${tab === 'notes' ? 'on' : ''}">AI Notes</button></div>
+    <div id="transcript" style="display:${tab === 'transcript' ? 'block' : 'none'}">${tr}</div>
+    <div id="notesWrap" style="display:${tab === 'notes' ? 'block' : 'none'}">${notes}</div>`;
+  document.getElementById('tT').onclick = () => { tab = 'transcript'; showDetail(); };
+  document.getElementById('tN').onclick = () => { tab = 'notes'; showDetail(); };
+  document.getElementById('bDel').onclick = async () => { await api.sessionRemove(selected); selected = null; detail.innerHTML = ''; refresh(); };
+  const bEnd = document.getElementById('bEnd');
+  if (bEnd) bEnd.onclick = async () => {
+    bEnd.disabled = true; bEnd.textContent = 'Ending… generating notes…';
+    try { await api.sessionEnd(selected); } catch (_) {}
+    tab = 'notes'; refresh().then(showDetail);
+  };
+}
+document.getElementById('bNew').onclick = () => {
+  const f = document.getElementById('newForm');
+  f.style.display = f.style.display === 'block' ? 'none' : 'block';
+};
+document.getElementById('bCancelNew').onclick = () => { document.getElementById('newForm').style.display = 'none'; };
+document.getElementById('bCreate').onclick = async () => {
+  const payload = {
+    company: document.getElementById('nCompany').value,
+    role: document.getElementById('nRole').value,
+    title: `${document.getElementById('nCompany').value || 'Untitled'} — ${document.getElementById('nRole').value || 'Interview'}`,
+    mode: nMode.value, language: nLang.value,
+    resume: document.getElementById('nResume').value, jobDescription: document.getElementById('nJd').value,
+    saveTranscript: document.getElementById('nSave').checked,
+  };
+  const r = await api.sessionCreate(payload);
+  document.getElementById('newForm').style.display = 'none';
+  selected = r.session && r.session.id;
+  refresh().then(() => { if (selected) showDetail(); });
+};
+document.getElementById('bHide').onclick = () => api.windowHide('sessions');
+document.getElementById('search').oninput = refresh;
+document.getElementById('fState').onchange = refresh;
+if (api.onSessionChanged) api.onSessionChanged(refresh);
+refresh();
+</script>
+</body>
+</html>

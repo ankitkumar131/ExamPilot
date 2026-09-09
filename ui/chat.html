@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Chat</title>
+<script src="./demo-mock.js"></script>
+<script src="./markdown.js"></script>
+<style>
+  html, body { margin: 0; background: transparent; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  #win { -webkit-app-region: drag; background: rgba(13,16,24,.95); border: 1px solid #2c3549; border-radius: 14px;
+    color: #e6e9f0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; backdrop-filter: blur(14px); }
+  #bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #232b3d; font-size: 13px; font-weight: 700; }
+  button, input, label { -webkit-app-region: no-drag; }
+  button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 8px; font-size: 12px; padding: 5px 10px; cursor: pointer; }
+  button:hover { border-color: #7c3aed; }
+  button.on { background: #7c3aed; border-color: #7c3aed; }
+  #mockWrap { margin-left: auto; font-size: 11.5px; color: #9aa3b2; font-weight: 400; display: flex; gap: 6px; align-items: center; }
+  #msgs { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; -webkit-app-region: no-drag; }
+  .msg { max-width: 92%; padding: 9px 12px; border-radius: 12px; font-size: 13.5px; line-height: 1.55; }
+  .msg.user { align-self: flex-end; background: #7c3aed; color: #fff; border-bottom-right-radius: 4px; }
+  .msg.ai { align-self: flex-start; background: #1a2130; border: 1px solid #2c3549; border-bottom-left-radius: 4px; width: 100%; box-sizing: border-box; }
+  .msg.ai p { margin: 6px 0; }
+  .md-inline { background: #0d1117; padding: 1px 6px; border-radius: 6px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  .md-code { background: #0d1117; border: 1px solid #2c3549; border-radius: 8px; margin: 8px 0; overflow: hidden; }
+  .md-code-head { display: flex; justify-content: space-between; padding: 5px 10px; background: #161c28; font-size: 11px; color: #9aa3b2; }
+  .md-code pre { margin: 0; padding: 10px; overflow-x: auto; font-size: 12px; }
+  #inputBar { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid #232b3d; }
+  #input { flex: 1; background: #0d1117; border: 1px solid #2c3549; border-radius: 10px; color: #e6e9f0; font-size: 13px; padding: 9px 12px; outline: none; }
+  #input:focus { border-color: #7c3aed; }
+  #typing { font-size: 12px; color: #9aa3b2; padding: 0 14px 8px; display: none; }
+</style>
+</head>
+<body>
+<div id="win">
+  <div id="bar">💬 Chat
+    <span id="mockWrap"><button id="bMock" title="Practice against an AI interviewer">Mock interview: off</button></span>
+    <button id="bShot" title="Screenshot + analyze">◧</button>
+    <button id="bHide">Hide</button>
+  </div>
+  <div id="msgs"></div>
+  <div id="typing">…</div>
+  <div id="inputBar">
+    <input id="input" placeholder="Ask a follow-up, or paste a question…" autocomplete="off"/>
+    <button id="bSend">Send</button>
+  </div>
+</div>
+<script>
+const api = window.electronAPI || window.DemoMock;
+const msgs = document.getElementById('msgs'), input = document.getElementById('input'),
+  typing = document.getElementById('typing'), bMock = document.getElementById('bMock');
+let mock = false, streamingEl = null, streamingText = '';
+function scroll() { msgs.scrollTop = msgs.scrollHeight; }
+function addUser(t) {
+  const d = document.createElement('div');
+  d.className = 'msg user'; d.textContent = t;
+  msgs.appendChild(d); scroll();
+}
+function addAi(t) {
+  const d = document.createElement('div');
+  d.className = 'msg ai'; d.innerHTML = renderMarkdown(t);
+  msgs.appendChild(d); scroll();
+  return d;
+}
+async function send() {
+  const t = input.value.trim();
+  if (!t) return;
+  input.value = '';
+  addUser(t);
+  typing.style.display = 'block'; typing.textContent = 'Thinking…';
+  streamingText = '';
+  streamingEl = addAi('…');
+  try { await api.llmAsk({ text: t, scope: mock ? 'mock' : 'chat' }); }
+  catch (e) { typing.textContent = 'Error: ' + e.message; streamingEl = null; return; }
+}
+document.getElementById('bSend').onclick = send;
+input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+document.getElementById('bShot').onclick = () => api.pickerPick();
+document.getElementById('bHide').onclick = () => api.windowHide('chat');
+bMock.onclick = async () => {
+  mock = !mock;
+  bMock.textContent = mock ? 'Mock interview: ON' : 'Mock interview: off';
+  bMock.classList.toggle('on', mock);
+  try {
+    await api.llmMock(mock);
+    if (mock) { typing.style.display = 'block'; typing.textContent = 'Interviewer joining…'; streamingText = ''; streamingEl = addAi('…'); }
+  } catch (_) {}
+};
+if (api.onProviderAttempt) api.onProviderAttempt((a) => { if (a) typing.textContent = `Answering via ${a.provider}…`; });
+if (api.onAnswerChunk) api.onAnswerChunk((c) => {
+  if (!c || !streamingEl) return;
+  streamingText += c.text || '';
+  streamingEl.innerHTML = renderMarkdown(streamingText);
+  scroll();
+});
+if (api.onAnswerDone) api.onAnswerDone((r) => {
+  typing.style.display = 'none';
+  if (streamingEl && r && r.text) streamingEl.innerHTML = renderMarkdown(r.text);
+  else if (r && r.text && !streamingEl) addAi(r.text);
+  streamingEl = null;
+});
+if (api.onAnswerError) api.onAnswerError((e) => {
+  if (!e || e.scope === 'stt') return;
+  typing.textContent = 'Error: ' + (e.error || 'failed');
+  streamingEl = null;
+});
+if (api.isDemo) {
+  addUser('How would you design a rate limiter for a public API?');
+  addAi('**Direct answer:** per-key token buckets in Redis with a Lua script for atomic refill + consume.\n\n- **Burst:** bucket size caps bursts\n- **Scale:** O(1) per request; shard by key\n\n```python\n# consume-or-reject in one Lua call\n```');
+}
+</script>
+</body>
+</html>

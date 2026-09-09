@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Settings</title>
+<script src="./demo-mock.js"></script>
+<style>
+  html, body { margin: 0; background: transparent; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  #win { -webkit-app-region: drag; background: rgba(13,16,24,.97); border: 1px solid #2c3549; border-radius: 14px;
+    color: #e6e9f0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; backdrop-filter: blur(14px); }
+  button, input, select, textarea { -webkit-app-region: no-drag; }
+  #bar { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid #232b3d; }
+  #bar h1 { font-size: 15px; margin: 0; }
+  button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 8px; font-size: 12.5px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: #7c3aed; }
+  button.primary { background: #7c3aed; border-color: #7c3aed; }
+  button.small { font-size: 11.5px; padding: 4px 8px; }
+  input, select, textarea { background: #0d1117; border: 1px solid #2c3549; border-radius: 8px; color: #e6e9f0; font-size: 12.5px; padding: 7px 10px; }
+  input:focus, select:focus, textarea:focus { border-color: #7c3aed; outline: none; }
+  #tabs { display: flex; gap: 6px; padding: 10px 14px 0; flex-wrap: wrap; }
+  #tabs button.on { background: #7c3aed; border-color: #7c3aed; }
+  #content { flex: 1; overflow-y: auto; padding: 16px; -webkit-app-region: no-drag; }
+  .card { background: #151b28; border: 1px solid #232b3d; border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+  .card h3 { margin: 0 0 4px; font-size: 13.5px; }
+  .card p.hint { margin: 0 0 10px; font-size: 12px; color: #9aa3b2; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  label.f { display: block; font-size: 11.5px; color: #9aa3b2; margin: 8px 0 4px; }
+  label.f input, label.f select { width: 100%; box-sizing: border-box; margin-top: 4px; }
+  .provHead { display: flex; align-items: center; gap: 10px; }
+  .provHead input[type=checkbox] { width: 16px; height: 16px; }
+  .keyRow { display: flex; gap: 8px; } .keyRow input { flex: 1; }
+  .testRes { font-size: 12px; margin-left: 8px; }
+  .ok { color: #4ade80; } .bad { color: #fca5a5; }
+  .orderRow { display: flex; align-items: center; gap: 8px; background: #0d1117; border: 1px solid #2c3549; border-radius: 8px; padding: 7px 10px; margin-bottom: 6px; font-size: 13px; }
+  .orderRow .rank { color: #7c3aed; font-weight: 700; width: 22px; }
+  .orderRow .sp { margin-left: auto; display: flex; gap: 4px; }
+  .orderRow.off { opacity: .45; }
+  .shortRow { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12.5px; }
+  .shortRow span { flex: 1; color: #cfd5e1; }
+  .shortRow input { width: 260px; font-family: ui-monospace, monospace; }
+  #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #7c3aed; color: #fff;
+    font-size: 13px; padding: 8px 18px; border-radius: 20px; display: none; }
+  textarea.area { width: 100%; box-sizing: border-box; min-height: 70px; resize: vertical; }
+  .warn { font-size: 12px; color: #fcd34d; background: rgba(245,158,11,.08); border: 1px solid rgba(245,158,11,.3); border-radius: 8px; padding: 8px 10px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<div id="win">
+  <div id="bar"><h1>⚙ Settings</h1>
+    <span style="margin-left:auto;display:flex;gap:8px">
+      <button id="bSave" class="primary">Save all</button>
+      <button id="bHide">Close</button>
+    </span>
+  </div>
+  <div id="tabs">
+    <button data-t="providers" class="on">Providers</button>
+    <button data-t="fallback">Fallback & Models</button>
+    <button data-t="audio">Audio & Speech</button>
+    <button data-t="stealth">Stealth</button>
+    <button data-t="shortcuts">Shortcuts</button>
+    <button data-t="session">Session & Context</button>
+    <button data-t="about">About</button>
+  </div>
+  <div id="content"></div>
+</div>
+<div id="toast"></div>
+<script>
+const api = window.electronAPI || window.DemoMock;
+const content = document.getElementById('content');
+let S = null, shortcuts = {}, tab = 'providers';
+const PROVIDER_INFO = {
+  openai: { label: 'OpenAI', keyUrl: 'https://platform.openai.com/api-keys', needsKey: true, hasBase: true },
+  anthropic: { label: 'Anthropic', keyUrl: 'https://console.anthropic.com/', needsKey: true, hasBase: true },
+  gemini: { label: 'Google Gemini', keyUrl: 'https://aistudio.google.com/', needsKey: true, hasBase: true },
+  groq: { label: 'Groq', keyUrl: 'https://console.groq.com/keys', needsKey: true, hasBase: true },
+  mistral: { label: 'Mistral', keyUrl: 'https://console.mistral.ai/', needsKey: true, hasBase: true },
+  deepseek: { label: 'DeepSeek', keyUrl: 'https://platform.deepseek.com/', needsKey: true, hasBase: true },
+  together: { label: 'Together AI', keyUrl: 'https://api.together.xyz/', needsKey: true, hasBase: true },
+  openrouter: { label: 'OpenRouter', keyUrl: 'https://openrouter.ai/keys', needsKey: true, hasBase: true },
+  azure: { label: 'Azure OpenAI', keyUrl: 'https://portal.azure.com/', needsKey: true, hasBase: false, azure: true },
+  ollama: { label: 'Ollama (local, free)', keyUrl: 'https://ollama.com/', needsKey: false, hasBase: true },
+  custom: { label: 'Custom OpenAI-compatible', keyUrl: '', needsKey: false, hasBase: true },
+};
+const PROVIDER_IDS = Object.keys(PROVIDER_INFO);
+const STT_INFO = {
+  'whisper-local': 'Whisper CLI (offline, free)',
+  'openai-whisper': 'Whisper via API (OpenAI/Groq endpoint)',
+  deepgram: 'Deepgram', assemblyai: 'AssemblyAI', azure: 'Azure Speech',
+};
+const SHORT_LABELS = { screenshot: 'Screenshot + analyze', panic: 'Hide / show all (panic)', toggleInteraction: 'Toggle click-through', mic: 'Start / stop listening', answer: 'Force answer', chat: 'Open chat', sessions: 'Open sessions', settings: 'Open settings', clear: 'Clear memory', quit: 'Quit app', moveUp: 'Move overlay up', moveDown: 'Move overlay down', moveLeft: 'Move overlay left', moveRight: 'Move overlay right' };
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.style.display = 'block';
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.style.display = 'none', 2200);
+}
+function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); }
+
+// ---------- tab renderers ----------
+function renderProviders() {
+  content.innerHTML = '<div class="warn">🔑 Keys are stored encrypted on this device (OS keychain where available) and sent only to the provider you enable. Enable 2+ providers for automatic fallback.</div>' +
+    PROVIDER_IDS.map((id) => {
+      const p = S.providers[id] || {};
+      const info = PROVIDER_INFO[id];
+      const keyLink = info.keyUrl ? `<a href="${info.keyUrl}" data-ext="${info.keyUrl}" style="color:#c4b5fd;font-size:11.5px">get key ↗</a>` : '';
+      return `<div class="card"><div class="provHead">
+        <input type="checkbox" data-p="${id}" data-f="enabled" ${p.enabled ? 'checked' : ''}/>
+        <h3>${info.label}</h3>${keyLink}
+        <span style="margin-left:auto"><button class="small" data-test="${id}">Test</button><span class="testRes" id="tr_${id}"></span></span>
+      </div>
+      ${info.needsKey ? `<label class="f">API key<input type="password" data-p="${id}" data-f="apiKey" value="${esc(p.apiKey || '')}" placeholder="sk-…" autocomplete="off"/></label>` : '<p class="hint">No key needed — runs locally / on your endpoint.</p>'}
+      <div class="grid2">
+        <label class="f">${id === 'azure' ? 'Deployment' : 'Model'}<input data-p="${id}" data-f="model" value="${esc(p.model || '')}"/></label>
+        ${info.hasBase ? `<label class="f">Base URL<input data-p="${id}" data-f="baseUrl" value="${esc(p.baseUrl || '')}"/></label>` : ''}
+        ${info.azure ? `<label class="f">Resource<input data-p="${id}" data-f="resource" value="${esc(p.resource || '')}" placeholder="my-resource"/></label>` : ''}
+      </div>
+      ${info.azure ? `<div class="grid2"><label class="f">Deployment name<input data-p="${id}" data-f="deployment" value="${esc(p.deployment || '')}"/></label><label class="f">API version<input data-p="${id}" data-f="apiVersion" value="${esc(p.apiVersion || '2024-08-01-preview')}"/></label></div>` : ''}
+      </div>`;
+    }).join('');
+  content.querySelectorAll('[data-test]').forEach((b) => b.onclick = () => testProvider(b.dataset.test));
+  content.querySelectorAll('[data-ext]').forEach((a) => a.onclick = (e) => { e.preventDefault(); api.shellOpenExternal(a.dataset.ext); });
+}
+async function testProvider(id) {
+  collect();
+  const el = document.getElementById('tr_' + id);
+  el.textContent = 'testing…'; el.className = 'testRes';
+  try {
+    const r = await api.providersTest({ id, config: {} });
+    el.textContent = '✓ ' + (r.text || 'OK').slice(0, 24); el.className = 'testRes ok';
+  } catch (e) { el.textContent = '✗ ' + e.message.slice(0, 60); el.className = 'testRes bad'; }
+}
+function orderListHTML(list, enabledSet, ns) {
+  return list.map((id, i) => {
+    const label = ns === 'stt' ? (STT_INFO[id] || id) : (PROVIDER_INFO[id] ? PROVIDER_INFO[id].label : id);
+    const off = enabledSet && !enabledSet.has(id) ? ' off' : '';
+    return `<div class="orderRow${off}" data-id="${id}"><span class="rank">${i + 1}</span><span>${esc(label)} <span style="color:#525b70;font-size:11px">${esc(id)}</span></span>
+      <span class="sp"><button class="small" data-mv="${ns}:${i}:-1">↑</button><button class="small" data-mv="${ns}:${i}:1">↓</button></span></div>`;
+  }).join('');
+}
+function renderFallback() {
+  const enabled = new Set(PROVIDER_IDS.filter((id) => S.providers[id] && S.providers[id].enabled));
+  content.innerHTML = `
+    <div class="card"><h3>Answer fallback chain</h3><p class="hint">First reachable provider answers. On any failure (rate limit, outage, timeout) the next one takes over automatically. Disabled providers are skipped.</p>
+      <div id="fbList">${orderListHTML(S.fallbackOrder, enabled, 'fb')}</div></div>
+    <div class="card"><h3>Speech-to-text fallback chain</h3><p class="hint">First working engine transcribes each utterance. Local Whisper is free/offline; cloud engines need keys (Audio & Speech tab).</p>
+      <div id="sttList">${orderListHTML(S.stt.order, null, 'stt')}</div></div>
+    <div class="card"><h3>Generation defaults</h3><div class="grid3">
+      <label class="f">Timeout (ms)<input id="llmTimeout" type="number" value="${S.llm.timeoutMs}"/></label>
+      <label class="f">Max tokens<input id="llmTokens" type="number" value="${S.llm.maxTokens}"/></label>
+      <label class="f">Temperature<input id="llmTemp" type="number" step="0.1" value="${S.llm.temperature}"/></label>
+    </div>
+    <label class="f">Retries per provider before falling back<input id="llmRetries" type="number" value="${S.llm.retriesPerProvider}"/></label></div>`;
+  content.querySelectorAll('[data-mv]').forEach((b) => b.onclick = () => {
+    const [ns, iStr, dStr] = b.dataset.mv.split(':');
+    const i = Number(iStr), d = Number(dStr);
+    const list = ns === 'fb' ? S.fallbackOrder : S.stt.order;
+    const j = i + d;
+    if (j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    renderFallback();
+  });
+}
+function renderAudio() {
+  const a = S.audio, st = S.stt;
+  content.innerHTML = `
+    <div class="card"><h3>Capture sources</h3><p class="hint">Mic = your voice · System = interviewer via call audio loopback (Windows: automatic · Linux: needs monitor source below · macOS: limited).</p>
+      <label style="font-size:13px;margin-right:16px"><input type="checkbox" id="srcMic" ${a.sources.includes('mic') ? 'checked' : ''}/> Microphone</label>
+      <label style="font-size:13px"><input type="checkbox" id="srcSys" ${a.sources.includes('system') ? 'checked' : ''}/> System audio</label>
+      <div class="grid2"><label class="f">Speech language<input id="aLang" value="${esc(a.language)}" placeholder="en"/></label>
+      <label class="f">Linux PulseAudio monitor (optional)<input id="aMon" value="${esc(a.linuxMonitorSource || '')}" placeholder="auto"/></label></div>
+      <label style="font-size:13px"><input type="checkbox" id="aAuto" ${a.autoAnswer ? 'checked' : ''}/> Auto-answer detected questions</label>
+    </div>
+    <div class="card"><h3>Voice detection (VAD)</h3><div class="grid3">
+      <label class="f">Silence to cut (ms)<input id="vHang" type="number" value="${a.vad.silenceHangoverMs}"/></label>
+      <label class="f">Min speech (ms)<input id="vMin" type="number" value="${a.vad.minUtteranceMs}"/></label>
+      <label class="f">Max utterance (ms)<input id="vMax" type="number" value="${a.vad.maxUtteranceMs}"/></label>
+    </div></div>
+    <div class="card"><h3>Local Whisper (offline)</h3><p class="hint"><span id="whStat">checking…</span></p>
+      <label style="font-size:13px"><input type="checkbox" id="wEn" ${st.whisperLocal.enabled ? 'checked' : ''}/> Enabled</label>
+      <div class="grid3"><label class="f">Command<input id="wCmd" value="${esc(st.whisperLocal.command)}"/></label>
+      <label class="f">Model<input id="wModel" value="${esc(st.whisperLocal.model)}"/></label>
+      <label class="f">Language<input id="wLang" value="${esc(st.whisperLocal.language)}"/></label></div></div>
+    <div class="card"><h3>Whisper via API</h3>
+      <label style="font-size:13px"><input type="checkbox" id="owEn" ${st.openaiWhisper.enabled ? 'checked' : ''}/> Enabled</label>
+      <label class="f">API key<input type="password" id="owKey" value="${esc(st.openaiWhisper.apiKey || '')}"/></label>
+      <div class="grid2"><label class="f">Model<input id="owModel" value="${esc(st.openaiWhisper.model)}"/></label>
+      <label class="f">Base URL<input id="owBase" value="${esc(st.openaiWhisper.baseUrl)}"/></label></div></div>
+    <div class="card"><h3>Deepgram</h3>
+      <label style="font-size:13px"><input type="checkbox" id="dgEn" ${st.deepgram.enabled ? 'checked' : ''}/> Enabled</label>
+      <label class="f">API key<input type="password" id="dgKey" value="${esc(st.deepgram.apiKey || '')}"/></label>
+      <label class="f">Model<input id="dgModel" value="${esc(st.deepgram.model)}"/></label></div>
+    <div class="card"><h3>AssemblyAI</h3>
+      <label style="font-size:13px"><input type="checkbox" id="asEn" ${st.assemblyai.enabled ? 'checked' : ''}/> Enabled</label>
+      <label class="f">API key<input type="password" id="asKey" value="${esc(st.assemblyai.apiKey || '')}"/></label></div>
+    <div class="card"><h3>Azure Speech</h3>
+      <label style="font-size:13px"><input type="checkbox" id="azEn" ${st.azure.enabled ? 'checked' : ''}/> Enabled</label>
+      <div class="grid3"><label class="f">Key<input type="password" id="azKey" value="${esc(st.azure.key || '')}"/></label>
+      <label class="f">Region<input id="azRegion" value="${esc(st.azure.region || '')}"/></label>
+      <label class="f">Language<input id="azLang" value="${esc(st.azure.language || 'en-US')}"/></label></div></div>`;
+  api.whisperStatus().then((r) => {
+    const el = document.getElementById('whStat');
+    if (el) el.innerHTML = r.whisper && r.whisper.ok ? '<span class="ok">✓ whisper CLI available</span>' : `<span class="bad">✗ not found (${esc((r.whisper && r.whisper.error) || '')}). Install: pip install openai-whisper</span>`;
+  }).catch(() => {});
+}
+function renderStealth() {
+  const s = S.stealth;
+  content.innerHTML = `
+    <div class="warn">Stealth hides ExamPilot from Meet / Zoom / Teams screen-shares (content protection), the taskbar and the dock. Turn it OFF for practice so you can share your screen normally.</div>
+    <div class="card"><h3>Stealth mode</h3>
+      <label style="font-size:13px"><input type="checkbox" id="stEn" ${s.enabled ? 'checked' : ''}/> Enable stealth (recommended for live calls)</label>
+      <label class="f">Disguised process name<input id="stName" value="${esc(s.disguiseName)}"/></label>
+      <label style="font-size:13px"><input type="checkbox" id="stShare" ${s.hideOnShare ? 'checked' : ''}/> Extra protection while screen-sharing (content protection always on in stealth)</label>
+      <p class="hint">Panic key instantly hides every window — see Shortcuts tab.</p>
+    </div>`;
+}
+function renderShortcuts() {
+  content.innerHTML = '<div class="card"><h3>Global shortcuts</h3><p class="hint">Click Save all, then test. Use Electron accelerator syntax, e.g. CommandOrControl+Shift+S.</p>' +
+    Object.keys(SHORT_LABELS).map((k) =>
+      `<div class="shortRow"><span>${SHORT_LABELS[k]}</span><input data-sc="${k}" value="${esc(shortcuts[k] || '')}"/></div>`
+    ).join('') + '</div>';
+}
+function renderSession() {
+  const d = S.sessionDefaults;
+  const MODES = [['auto','Auto-detect'],['dsa','DSA / LeetCode'],['coding','General Coding'],['frontend','Frontend'],['backend','Backend / APIs'],['system-design','System Design'],['behavioral','Behavioral / HR'],['devops','DevOps / SRE'],['data-science','Data / ML'],['product','Product / PM'],['general','General / Sales'],['custom','Custom']];
+  const LANGS = ['python','javascript','typescript','cpp','c','java','go','rust','csharp','kotlin','swift','sql'];
+  content.innerHTML = `<div class="card"><h3>Defaults for new sessions</h3>
+    <div class="grid2">
+      <label class="f">Interview mode<select id="dMode">${MODES.map(([v, l]) => `<option value="${v}" ${d.mode === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label class="f">Coding language<select id="dLang">${LANGS.map((v) => `<option ${d.language === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+      <label class="f">Company<input id="dCompany" value="${esc(d.company || '')}"/></label>
+      <label class="f">Role<input id="dRole" value="${esc(d.role || '')}"/></label>
+    </div>
+    <label class="f">Resume (pasted text)<textarea class="area" id="dResume">${esc(d.resume || '')}</textarea></label>
+    <label class="f">Job description<textarea class="area" id="dJd">${esc(d.jobDescription || '')}</textarea></label>
+    <label style="font-size:13px"><input type="checkbox" id="dSave" ${d.saveTranscript ? 'checked' : ''}/> Save transcripts by default</label>
+  </div>`;
+}
+function renderAbout() {
+  content.innerHTML = `<div class="card"><h3>ExamPilot v0.1.0</h3>
+    <p class="hint">Invisible real-time interview copilot: mic + system listening, screenshots, sessions, AI notes, mock interviews — with every major AI provider + automatic fallback.</p>
+    <p class="hint">Use responsibly: only in interviews/calls where assistance is allowed, or for practice. You are responsible for complying with each platform's and employer's policies.</p>
+    <p class="hint">Keys never leave your machine except to the provider you enabled. No telemetry.</p></div>`;
+}
+function render() {
+  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === tab));
+  ({ providers: renderProviders, fallback: renderFallback, audio: renderAudio, stealth: renderStealth, shortcuts: renderShortcuts, session: renderSession, about: renderAbout })[tab]();
+}
+document.querySelectorAll('#tabs button').forEach((b) => b.onclick = () => { collect(); tab = b.dataset.t; render(); });
+
+// ---------- collect + save ----------
+function val(id) { const el = document.getElementById(id); return el ? el.value : undefined; }
+function chk(id) { const el = document.getElementById(id); return el ? el.checked : undefined; }
+function collect() {
+  if (!S) return;
+  content.querySelectorAll('[data-p]').forEach((el) => {
+    const p = S.providers[el.dataset.p];
+    if (!p) return;
+    p[el.dataset.f] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  if (val('llmTimeout') !== undefined) {
+    S.llm.timeoutMs = Number(val('llmTimeout')) || 45000;
+    S.llm.maxTokens = Number(val('llmTokens')) || 2048;
+    S.llm.temperature = Number(val('llmTemp')) || 0;
+    S.llm.retriesPerProvider = Number(val('llmRetries')) || 0;
+  }
+  if (chk('srcMic') !== undefined) {
+    S.audio.sources = [chk('srcMic') && 'mic', chk('srcSys') && 'system'].filter(Boolean);
+    S.audio.language = val('aLang') || 'en';
+    S.audio.linuxMonitorSource = val('aMon') || '';
+    S.audio.autoAnswer = !!chk('aAuto');
+    S.audio.vad.silenceHangoverMs = Number(val('vHang')) || 800;
+    S.audio.vad.minUtteranceMs = Number(val('vMin')) || 400;
+    S.audio.vad.maxUtteranceMs = Number(val('vMax')) || 20000;
+    S.stt.whisperLocal = { enabled: !!chk('wEn'), command: val('wCmd'), model: val('wModel'), language: val('wLang') };
+    if (!String(val('owKey') || '').startsWith('••••')) S.stt.openaiWhisper.apiKey = val('owKey');
+    S.stt.openaiWhisper.enabled = !!chk('owEn'); S.stt.openaiWhisper.model = val('owModel'); S.stt.openaiWhisper.baseUrl = val('owBase');
+    if (!String(val('dgKey') || '').startsWith('••••')) S.stt.deepgram.apiKey = val('dgKey');
+    S.stt.deepgram.enabled = !!chk('dgEn'); S.stt.deepgram.model = val('dgModel');
+    if (!String(val('asKey') || '').startsWith('••••')) S.stt.assemblyai.apiKey = val('asKey');
+    S.stt.assemblyai.enabled = !!chk('asEn');
+    if (!String(val('azKey') || '').startsWith('••••')) S.stt.azure.key = val('azKey');
+    S.stt.azure.enabled = !!chk('azEn'); S.stt.azure.region = val('azRegion'); S.stt.azure.language = val('azLang');
+  }
+  if (chk('stEn') !== undefined) {
+    S.stealth.enabled = !!chk('stEn');
+    S.stealth.disguiseName = val('stName') || 'Terminal ';
+    S.stealth.hideOnShare = !!chk('stShare');
+  }
+  content.querySelectorAll('[data-sc]').forEach((el) => { shortcuts[el.dataset.sc] = el.value.trim(); });
+  if (val('dMode') !== undefined) {
+    S.sessionDefaults = { mode: val('dMode'), language: val('dLang'), company: val('dCompany'), role: val('dRole'), resume: val('dResume'), jobDescription: val('dJd'), saveTranscript: !!chk('dSave') };
+  }
+}
+document.getElementById('bSave').onclick = async () => {
+  collect();
+  try {
+    // Masked keys (••••) mean "unchanged" — strip so main keeps stored ones.
+    for (const id of Object.keys(S.providers)) {
+      if (typeof S.providers[id].apiKey === 'string' && S.providers[id].apiKey.startsWith('••••')) delete S.providers[id].apiKey;
+    }
+    const r = await api.settingsSave(S);
+    S = r.settings;
+    try { await api.shortcutsSave(shortcuts); } catch (_) {}
+    try { await api.stealthSet({}); } catch (_) {}
+    toast(api.isDemo ? 'Demo preview — nothing saved' : 'Saved ✓');
+    render();
+  } catch (e) { toast('Save failed: ' + e.message); }
+};
+document.getElementById('bHide').onclick = () => api.windowHide('settings');
+
+// ---------- init ----------
+(async () => {
+  const r = await api.settingsGet();
+  S = r.settings;
+  try { shortcuts = (await api.shortcutsGet()).shortcuts || {}; } catch (_) { shortcuts = {}; }
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>ExamPilot</title>
+<script src="./demo-mock.js"></script>
+<style>
+  html, body { margin: 0; background: transparent; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  #pill { -webkit-app-region: drag; display: flex; align-items: center; gap: 6px; background: rgba(13,16,24,.92);
+    border: 1px solid rgba(124,58,237,.45); border-radius: 14px; padding: 8px 10px; color: #e6e9f0;
+    box-shadow: 0 8px 32px rgba(0,0,0,.5); backdrop-filter: blur(12px); }
+  button, select { -webkit-app-region: no-drag; }
+  button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 9px; font-size: 12px;
+    padding: 6px 10px; cursor: pointer; white-space: nowrap; }
+  button:hover { border-color: #7c3aed; background: #232b3d; }
+  button.on { background: #7c3aed; border-color: #7c3aed; color: #fff; }
+  button.rec.on { background: #dc2626; border-color: #dc2626; }
+  button:disabled { opacity: .45; cursor: default; }
+  select { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 9px; font-size: 11.5px; padding: 5px 6px; max-width: 118px; }
+  #dot { width: 9px; height: 9px; border-radius: 50%; background: #525b70; flex: none; margin-left: 2px; }
+  #dot.live { background: #22c55e; box-shadow: 0 0 8px #22c55e; animation: pulse 1.6s infinite; }
+  #dot.busy { background: #f59e0b; box-shadow: 0 0 8px #f59e0b; }
+  @keyframes pulse { 50% { opacity: .5; } }
+  #panel { margin-top: 8px; background: rgba(13,16,24,.92); border: 1px solid #262d3d; border-radius: 12px;
+    padding: 10px 12px; color: #cfd5e1; font-size: 12.5px; max-height: 210px; overflow-y: auto; backdrop-filter: blur(12px); }
+  #panel.hidden { display: none; }
+  #status { color: #9aa3b2; font-size: 12px; margin-bottom: 6px; display: flex; justify-content: space-between; gap: 8px; }
+  #prov { color: #c4b5fd; font-weight: 600; }
+  .line { margin: 3px 0; line-height: 1.45; }
+  .line b.you { color: #7dd3fc; } .line b.iv { color: #f0abfc; }
+  #err { color: #fca5a5; font-size: 12px; margin-top: 6px; display: none; }
+</style>
+</head>
+<body>
+<div id="pill">
+  <span id="dot" title="status"></span>
+  <button id="bRec" class="rec" title="Start/stop listening (Alt+R)">● Listen</button>
+  <button id="bAnswer" title="Force answer from transcript (Ctrl+Shift+A)">Answer</button>
+  <button id="bShot" title="Screenshot area + analyze (Ctrl+Shift+S)">◧ Shot</button>
+  <button id="bChat" title="Chat (Ctrl+Shift+C)">💬</button>
+  <button id="bSess" title="Sessions (Ctrl+Shift+D)">🗂</button>
+  <button id="bAuto" class="on" title="Auto-answer interview questions">Auto</button>
+  <select id="selMode" title="Interview mode"></select>
+  <select id="selLang" title="Coding language"></select>
+  <button id="bPanel" title="Show/hide live transcript">≡</button>
+  <button id="bSet" title="Settings (Ctrl+,)">⚙</button>
+  <button id="bHide" title="Hide (Ctrl+Shift+H)">–</button>
+</div>
+<div id="panel" class="hidden">
+  <div id="status"><span id="statusText">Idle — press Listen or take a screenshot.</span><span id="prov"></span></div>
+  <div id="lines"></div>
+  <div id="err"></div>
+</div>
+
+<script>
+const api = window.electronAPI || window.DemoMock;
+const $ = (id) => document.getElementById(id);
+const MODES = [['auto','Auto'],['dsa','DSA'],['coding','Coding'],['frontend','Frontend'],['backend','Backend'],['system-design','SysDesign'],['behavioral','HR'],['devops','DevOps'],['data-science','Data/ML'],['product','PM'],['general','General'],['custom','Custom']];
+const LANGS = ['python','javascript','typescript','cpp','c','java','go','rust','csharp','kotlin','swift','sql'];
+const modeSel = $('selMode'), langSel = $('selLang');
+MODES.forEach(([v, l]) => { const o = document.createElement('option'); o.value = v; o.textContent = l; modeSel.appendChild(o); });
+LANGS.forEach((v) => { const o = document.createElement('option'); o.value = v; o.textContent = v; langSel.appendChild(o); });
+
+let listening = false, autoAnswer = true, panelOpen = false;
+const linesEl = $('lines'), statusText = $('statusText'), provEl = $('prov'), errEl = $('err'), dot = $('dot');
+
+function setErr(msg) {
+  if (!msg) { errEl.style.display = 'none'; errEl.textContent = ''; return; }
+  errEl.style.display = 'block'; errEl.textContent = msg;
+  clearTimeout(setErr._t); setErr._t = setTimeout(() => setErr(''), 8000);
+}
+function setStatus(t, mode) {
+  statusText.textContent = t;
+  dot.className = mode || '';
+  if (mode) dot.id = 'dot', dot.classList.add(mode);
+}
+function addLine(seg) {
+  const div = document.createElement('div');
+  div.className = 'line';
+  const who = seg.speaker === 'you' ? '<b class="you">You:</b>' : '<b class="iv">Q:</b>';
+  div.innerHTML = `${who} ${seg.text.replace(/</g, '&lt;')}`;
+  linesEl.appendChild(div);
+  while (linesEl.children.length > 6) linesEl.removeChild(linesEl.firstChild);
+}
+function setPanel(open) {
+  panelOpen = open;
+  $('panel').classList.toggle('hidden', !open);
+  $('bPanel').classList.toggle('on', open);
+  if (api.windowResize && !api.isDemo) api.windowResize({ name: 'overlay', width: 660, height: open ? 300 : 64 });
+}
+
+// ---------- capture engine (mic + system loopback → PCM16@16k → main) ----------
+const WORKLET_SRC = `
+class Cap extends AudioWorkletProcessor {
+  constructor() { super(); this.acc = []; this.N = 4800; }
+  process(inputs) {
+    const chs = inputs[0];
+    if (chs && chs.length) {
+      const L = chs[0], R = chs.length > 1 ? chs[1] : chs[0];
+      for (let i = 0; i < L.length; i++) this.acc.push((L[i] + R[i]) * 0.5);
+      while (this.acc.length >= this.N) this.port.postMessage({ samples: this.acc.splice(0, this.N), rate: sampleRate });
+    }
+    return true;
+  }
+}
+registerProcessor('exampilot-cap', Cap);`;
+let workletURL = null, engines = [];
+function resampleTo16k(samples, rate) {
+  const step = rate / 16000, n = Math.floor(samples.length / step);
+  const out = new Int16Array(n);
+  for (let i = 0; i < n; i++) {
+    const idx = i * step, i0 = Math.floor(idx), i1 = Math.min(i0 + 1, samples.length - 1);
+    const v = samples[i0] + (samples[i1] - samples[i0]) * (idx - i0);
+    out[i] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
+  }
+  return out;
+}
+function b64encode(u8) {
+  let s = '';
+  for (let i = 0; i < u8.length; i += 8192) s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192));
+  return btoa(s);
+}
+async function attachCapture(stream, source) {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new Ctx({ latencyHint: 'interactive' });
+  if (!workletURL) workletURL = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }));
+  await ctx.audioWorklet.addModule(workletURL);
+  const src = ctx.createMediaStreamSource(stream);
+  const node = new AudioWorkletNode(ctx, 'exampilot-cap', { numberOfInputs: 1, numberOfOutputs: 0 });
+  node.port.onmessage = (ev) => {
+    try {
+      const pcm = resampleTo16k(ev.data.samples, ev.data.rate || ctx.sampleRate);
+      api.sendPcm(source, b64encode(new Uint8Array(pcm.buffer)));
+    } catch (_) {}
+  };
+  src.connect(node);
+  engines.push({ ctx, stream, source });
+  return true;
+}
+function stopCaptures() {
+  for (const e of engines) {
+    try { e.stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+    try { e.ctx.close(); } catch (_) {}
+  }
+  engines = [];
+}
+async function startMic() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+  await attachCapture(stream, 'mic');
+}
+async function startLoopback() {
+  let stream = null, lastErr = null;
+  try {
+    const r = await api.loopbackGetSource();
+    const sourceId = r && r.sourceId;
+    if (sourceId) {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId } },
+        video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId, maxWidth: 1, maxHeight: 1 } },
+      });
+    }
+  } catch (e) { lastErr = e; }
+  if (!stream) {
+    // Fallback: user picks the tab/window (works in browsers + some Linux setups).
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+  }
+  try { stream.getVideoTracks().forEach((t) => t.stop()); } catch (_) {}
+  if (!stream.getAudioTracks().length) throw new Error('No system-audio track (loopback unsupported here). Mic still works.');
+  await attachCapture(stream, 'system');
+}
+
+// ---------- actions ----------
+async function toggleListen() {
+  setErr('');
+  if (!listening) {
+    if (api.isDemo) { listening = true; paintListen(); setStatus('Demo preview — no real capture.', 'live'); return; }
+    try {
+      const st = await api.settingsGet();
+      const sources = (st.settings.audio && st.settings.audio.sources) || ['mic', 'system'];
+      await api.audioStart();
+      if (sources.includes('mic')) { try { await startMic(); } catch (e) { setErr('Mic failed: ' + e.message); } }
+      if (sources.includes('system')) { try { await startLoopback(); } catch (e) { setErr('System audio: ' + e.message + ' — continuing with mic.'); } }
+      listening = true; paintListen(); setStatus('Listening… speak or play the call audio.', 'live'); setPanel(true);
+    } catch (e) { setErr('Listen failed: ' + e.message); }
+  } else {
+    try { await api.audioStop(); } catch (_) {}
+    stopCaptures();
+    listening = false; paintListen(); setStatus('Stopped.', '');
+  }
+}
+function paintListen() {
+  $('bRec').classList.toggle('on', listening);
+  $('bRec').textContent = listening ? '■ Stop' : '● Listen';
+}
+async function saveModeLang() {
+  try { await api.settingsSave({ sessionDefaults: { mode: modeSel.value, language: langSel.value } }); } catch (_) {}
+}
+$('bRec').onclick = toggleListen;
+$('bAnswer').onclick = async () => { setErr(''); try { await api.windowShow('response'); await api.llmAsk({ text: '(Use the live transcript above and answer the latest question now.)', scope: 'manual' }); } catch (e) { setErr(e.message); } };
+$('bShot').onclick = () => { setErr(''); api.pickerPick().catch((e) => setErr(e.message)); };
+$('bChat').onclick = () => api.windowShow('chat');
+$('bSess').onclick = () => api.windowShow('sessions');
+$('bSet').onclick = () => api.windowShow('settings');
+$('bHide').onclick = () => api.windowToggleAll();
+$('bPanel').onclick = () => setPanel(!panelOpen);
+$('bAuto').onclick = async () => {
+  autoAnswer = !autoAnswer;
+  $('bAuto').classList.toggle('on', autoAnswer);
+  try { await api.llmAutoAnswer(autoAnswer); } catch (_) {}
+};
+modeSel.onchange = saveModeLang;
+langSel.onchange = saveModeLang;
+
+// ---------- events ----------
+if (api.onTranscriptSegment) api.onTranscriptSegment((seg) => { if (seg) { addLine(seg); if (!panelOpen) setPanel(true); } });
+if (api.onAnswerStart) api.onAnswerStart(() => setStatus('Thinking…', 'busy'));
+if (api.onProviderAttempt) api.onProviderAttempt((a) => { if (a) { provEl.textContent = `${a.provider} · ${a.model || ''}`; setStatus(`Answering via ${a.provider}…`, 'busy'); } });
+if (api.onAnswerDone) api.onAnswerDone((r) => { if (r && r.provider) { provEl.textContent = `${r.provider} · ${r.model || ''}`; setStatus(listening ? 'Listening…' : 'Done.', listening ? 'live' : ''); } });
+if (api.onAnswerError) api.onAnswerError((e) => { if (e && e.scope !== 'stt') { setErr(e.error || 'Answer failed'); setStatus(listening ? 'Listening…' : 'Idle.', listening ? 'live' : ''); } });
+if (api.onListeningChanged) api.onListeningChanged((s) => { if (s && typeof s.listening === 'boolean' && s.listening !== listening && api.isDemo) { listening = s.listening; paintListen(); } });
+
+// ---------- init ----------
+(async () => {
+  try {
+    const st = await api.appGetStatus();
+    listening = !!st.listening; paintListen();
+    autoAnswer = st.autoAnswer !== false;
+    $('bAuto').classList.toggle('on', autoAnswer);
+    const sg = await api.settingsGet();
+    const d = sg.settings.sessionDefaults || {};
+    if (d.mode) modeSel.value = d.mode;
+    if (d.language) langSel.value = d.language;
+    const tg = await api.transcriptGet();
+    (tg.segments || []).slice(-6).forEach(addLine);
+    if ((tg.segments || []).length) setPanel(true);
+    if (api.isDemo) { provEl.textContent = 'groq · llama-3.3-70b-versatile'; setStatus('Demo preview.', ''); }
+  } catch (e) { setErr(e.message); }
+})();
+</script>
+</body>
+</html>
