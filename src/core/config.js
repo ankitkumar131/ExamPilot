@@ -23,7 +23,7 @@ function getDataDir() {
 const DEFAULTS = {
   app: {
     name: 'ExamPilot',
-    version: '0.1.0',
+    version: '0.1.1',
     processTitle: 'ExamPilot',
   },
   window: {
