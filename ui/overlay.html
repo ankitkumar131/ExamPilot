@@ -11,7 +11,7 @@
     box-shadow: 0 8px 32px rgba(0,0,0,.5); backdrop-filter: blur(12px); }
   button, select { -webkit-app-region: no-drag; }
   button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 9px; font-size: 12px;
-    padding: 6px 10px; cursor: pointer; white-space: nowrap; }
+    padding: 6px 10px; cursor: default; white-space: nowrap; }
   button:hover { border-color: #7c3aed; background: #232b3d; }
   button.on { background: #7c3aed; border-color: #7c3aed; color: #fff; }
   button.rec.on { background: #dc2626; border-color: #dc2626; }
@@ -36,7 +36,7 @@
   <span id="dot" title="status"></span>
   <button id="bRec" class="rec" title="Start/stop listening (Alt+R)">● Listen</button>
   <button id="bAnswer" title="Force answer from transcript (Ctrl+Shift+A)">Answer</button>
-  <button id="bShot" title="Screenshot area + analyze (Ctrl+Shift+S)">◧ Shot</button>
+  <button id="bShot" title="Auto screenshot + analyze (Ctrl+Shift+S)">◧ Shot</button>
   <button id="bChat" title="Chat (Ctrl+Shift+C)">💬</button>
   <button id="bSess" title="Sessions (Ctrl+Shift+D)">🗂</button>
   <button id="bAuto" class="on" title="Auto-answer interview questions">Auto</button>
@@ -197,7 +197,7 @@ async function saveModeLang() {
 }
 $('bRec').onclick = toggleListen;
 $('bAnswer').onclick = async () => { setErr(''); try { await api.windowShow('response'); await api.llmAsk({ text: '(Use the live transcript above and answer the latest question now.)', scope: 'manual' }); } catch (e) { setErr(e.message); } };
-$('bShot').onclick = () => { setErr(''); api.pickerPick().catch((e) => setErr(e.message)); };
+$('bShot').onclick = () => { setErr(''); api.captureFullscreen().catch((e) => setErr(e.message)); };
 $('bChat').onclick = () => api.windowShow('chat');
 $('bSess').onclick = () => api.windowShow('sessions');
 $('bSet').onclick = () => api.windowShow('settings');

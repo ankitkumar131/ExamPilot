@@ -29,7 +29,7 @@ function contextBlock({ resume, jobDescription, company, role }) {
   const parts = [];
   if (company || role) parts.push(`Interview context: ${company || 'Unknown company'} — ${role || 'Unknown role'}.`);
   if (jobDescription) parts.push(`Job description:\n${String(jobDescription).slice(0, 3000)}`);
-  if (resume) parts.push(`Candidate resume:\n${String(resume).slice(0, 4000)}`);
+  if (resume) parts.push(`Candidate resume:\n${String(resume).slice(0, 4000)}\n(PERSONAL ANSWERS: if asked anything about the candidate - background, experience, projects, skills, strengths - answer ONLY from this resume. Never invent employers, dates, titles, or numbers.)`);
   return parts.length ? `\n\n${parts.join('\n\n')}` : '';
 }
 
@@ -49,6 +49,7 @@ function codeRules(language) {
     '- Triple backticks with the correct language tag.',
     '- Production-ready, edge cases handled, minimal comments.',
     '- Always state time and space complexity.',
+    '- After the code, add "Keyword notes": 3-6 one-line bullets explaining what each important keyword/syntax does (e.g. what `yield`, `*args`, `lambda`, `JOIN`, `async/await` mean HERE).',
   ].join('\n');
 }
 
@@ -67,11 +68,11 @@ function systemFor(mode, opts = {}) {
         'WORKFLOW: 1) restate the task in 1 line 2) approach + why 3) code 4) test with 2-3 cases incl. edge cases.',
       ].join('\n') + ctx;
     case 'frontend':
-      return [`You are a senior frontend engineer. Answer JS/TS, React, CSS, browser questions precisely.`, base,
+      return [`You are a senior frontend engineer. Answer JS/TS, React, CSS, browser questions precisely.`, base, codeRules(language),
         'Prefer modern React (hooks), mention browser/rendering implications, give copy-pasteable snippets.',
       ].join('\n') + ctx;
     case 'backend':
-      return [`You are a senior backend engineer. Cover APIs, data modeling, concurrency, failure modes.`, base,
+      return [`You are a senior backend engineer. Cover APIs, data modeling, concurrency, failure modes.`, base, codeRules(language),
         'Include request/response shapes, DB choices with reasons, and scaling notes when relevant.',
       ].join('\n') + ctx;
     case 'system-design':

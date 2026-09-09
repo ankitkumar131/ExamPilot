@@ -18,15 +18,15 @@ merged into one open, provider-agnostic desktop app.
 | Area | What you get |
 |---|---|
 | 🎧 **Listens to everything** | Mic (you) + system loopback (interviewer) captured together, VAD utterance detection, live transcript with speaker labels |
-| ✦ **Auto Answer** | Detects questions mid-conversation and streams answers by itself (toggleable) |
-| ◧ **Screenshots** | Drag-select any region → vision analysis (DSA, code, diagrams, error messages) |
-| 🧠 **All interview types** | Auto-detect, DSA, Coding, Frontend, Backend, System Design, Behavioral/HR, DevOps, Data/ML, PM, General, Custom + 12 coding languages |
-| 🔑 **All AI providers** | OpenAI, Anthropic, Gemini, Groq, Mistral, DeepSeek, Together, OpenRouter, Azure OpenAI, Ollama (local), Custom OpenAI-compatible — keys stored encrypted on-device |
-| 🔁 **Fallback chains** | Ordered provider chain per answer; STT chain (local Whisper → OpenAI → Deepgram → AssemblyAI → Azure); retries + visible hop trail |
+| ✦ **Auto Answer** | Auto mode answers the live transcript continuously; specific modes answer detected questions (toggleable) |
+| ◧ **Screenshots** | One-click fullscreen capture → vision analysis (DSA, code, diagrams, error messages) |
+| 🧠 **All interview types** | Auto-detect, DSA, Coding, Frontend, Backend, System Design, Behavioral/HR, DevOps, Data/ML, PM, General, Custom + 12 languages; code answers include keyword explanations |
+| 🔑 **All AI providers** | OpenAI, Anthropic, Gemini, Groq, Mistral, DeepSeek, Together, OpenRouter, Azure OpenAI, Ollama (local), Custom — **multiple keys per provider** with auto-rotation, encrypted on-device |
+| 🔁 **Fallback chains** | Key rotation inside each provider + ordered provider chain per answer; STT chain (local Whisper → OpenAI → Deepgram → AssemblyAI → Azure); visible hop trail |
 | 🗂 **Sessions** | Parakeet-style dashboard: live/ended calls, search, transcripts, one-click **AI notes** (summary / questions / next steps) |
 | 🎭 **Mock interviews** | Practice against an AI interviewer in Chat |
 | 🥷 **Stealth (toggleable)** | Content-protected overlay (hidden from Meet/Zoom/Teams share), hidden taskbar/dock, disguised process name, panic key |
-| 📝 **Context-aware** | Resume + job description per session feed every answer |
+| 📝 **Context-aware** | Resume + JD per session (paste text or **upload PDF** — built-in parser); personal questions answered strictly from your resume |
 
 ## Quick start (code first — packaging later)
 

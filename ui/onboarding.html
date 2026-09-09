@@ -16,7 +16,7 @@
   .step p { margin: 0 0 10px; font-size: 12.5px; color: #9aa3b2; }
   select, input { background: #0d1117; border: 1px solid #2c3549; border-radius: 8px; color: #e6e9f0; font-size: 13px; padding: 8px 10px; }
   .row { display: flex; gap: 8px; } .row input { flex: 1; }
-  button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 8px; font-size: 13px; padding: 8px 14px; cursor: pointer; }
+  button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 8px; font-size: 13px; padding: 8px 14px; cursor: default; }
   button:hover { border-color: #7c3aed; }
   button.primary { background: #7c3aed; border-color: #7c3aed; font-weight: 600; }
   button:disabled { opacity: .5; }
@@ -84,7 +84,7 @@ prov.onchange = () => {
 document.getElementById('bTest').onclick = async () => {
   testRes.innerHTML = 'testing…';
   try {
-    await api.settingsSave({ providers: { [prov.value]: { enabled: true, apiKey: key.value } } });
+    await api.settingsSave({ providers: { [prov.value]: { enabled: true, apiKeys: [key.value] } } });
     const r = await api.providersTest({ id: prov.value, config: {} });
     testRes.innerHTML = `<span class="ok">✓ Connected (${(r.text || 'OK').slice(0, 30)}). You can finish setup.</span>`;
     testedOk = true; bFinish.disabled = false;

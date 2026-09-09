@@ -11,7 +11,7 @@
     color: #e6e9f0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; backdrop-filter: blur(14px); }
   #bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #232b3d; font-size: 13px; font-weight: 700; }
   button, input, label { -webkit-app-region: no-drag; }
-  button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 8px; font-size: 12px; padding: 5px 10px; cursor: pointer; }
+  button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 8px; font-size: 12px; padding: 5px 10px; cursor: default; }
   button:hover { border-color: #7c3aed; }
   button.on { background: #7c3aed; border-color: #7c3aed; }
   #mockWrap { margin-left: auto; font-size: 11.5px; color: #9aa3b2; font-weight: 400; display: flex; gap: 6px; align-items: center; }
@@ -34,7 +34,7 @@
 <div id="win">
   <div id="bar">💬 Chat
     <span id="mockWrap"><button id="bMock" title="Practice against an AI interviewer">Mock interview: off</button></span>
-    <button id="bShot" title="Screenshot + analyze">◧</button>
+    <button id="bShot" title="Auto screenshot + analyze">◧</button>
     <button id="bHide">Hide</button>
   </div>
   <div id="msgs"></div>
@@ -74,7 +74,7 @@ async function send() {
 }
 document.getElementById('bSend').onclick = send;
 input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
-document.getElementById('bShot').onclick = () => api.pickerPick();
+document.getElementById('bShot').onclick = () => api.captureFullscreen();
 document.getElementById('bHide').onclick = () => api.windowHide('chat');
 bMock.onclick = async () => {
   mock = !mock;

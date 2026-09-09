@@ -70,6 +70,11 @@ class ApplicationController {
     this.sessionSegCursor = 0;
     this.isReady = false;
     this.transcript.setAutoAnswer(this.store.settings.audio.autoAnswer !== false);
+    this.syncTranscriptMode();
+  }
+
+  syncTranscriptMode() {
+    try { this.transcript.setMode(this.sessionContext().mode); } catch (_) {}
   }
 
   // ---------- stealth identity ----------
@@ -126,7 +131,7 @@ class ApplicationController {
   registerShortcuts() {
     const s = this.effectiveShortcuts();
     this.shortcuts.registerAll(s, {
-      screenshot: () => this.flowScreenshotArea(),
+      screenshot: () => this.flowScreenshotFullscreen(),
       panic: () => this.windows.toggleAll(),
       toggleInteraction: () => this.windows.toggleInteraction(),
       mic: () => this.toggleListening(),
@@ -312,20 +317,6 @@ class ApplicationController {
     await this.runAnswer({ scope: 'manual', question, context });
   }
 
-  async flowScreenshotArea() {
-    try {
-      const rect = await this.windows.pickArea();
-      if (!rect) return; // cancelled
-      const shot = await captureService.captureAndProcess({ area: rect });
-      this.lastScreenshot = { base64: shot.imageBuffer.toString('base64'), mime: shot.mimeType, at: Date.now() };
-      this.windows.broadcast('capture:done', { width: shot.width, height: shot.height });
-      await this.flowVisionAnalyze('Analyze the attached screenshot for this interview.');
-    } catch (e) {
-      logger.warn('Screenshot flow failed', { error: e.message });
-      this.windows.broadcast('capture:error', { error: e.message });
-    }
-  }
-
   async flowScreenshotFullscreen() {
     try {
       const shot = await captureService.captureAndProcess({});
@@ -408,8 +399,6 @@ class ApplicationController {
       await this.flowScreenshotFullscreen();
       return ok({});
     });
-    ipcMain.handle('picker:pick', async () => { await this.flowScreenshotArea(); return ok({}); });
-    ipcMain.handle('picker:done', (_e, rect) => { this.windows.resolvePicker(rect); return ok({}); });
     ipcMain.handle('vision:analyze-last', async (_e, instruction) => {
       await this.flowVisionAnalyze(instruction || 'Analyze the attached screenshot for this interview.');
       return ok({});
@@ -465,6 +454,7 @@ class ApplicationController {
       this.transcript.clear();
       this.chatHistory = [];
       this.sessionSegCursor = 0;
+      this.syncTranscriptMode();
       this.windows.broadcast('session:active-changed', { session: this.sessions.active() });
       this.windows.broadcast('session:changed', {});
       return ok({ session: s });
@@ -499,13 +489,39 @@ class ApplicationController {
       return ok({ notes: s ? s.notes : null });
     });
 
+    ipcMain.handle('document:parse-pdf', async (_e, { name, base64 }) => {
+      try {
+        let parse;
+        try { parse = require('pdf-parse'); }
+        catch (_) { return fail(new Error('PDF parser not installed. Run: npm install')); }
+        const buf = Buffer.from(String(base64 || ''), 'base64');
+        if (!buf.length) return fail(new Error('Empty file'));
+        if (buf.length > 15 * 1024 * 1024) return fail(new Error('PDF too large (max 15MB)'));
+        const data = await parse(buf);
+        const text = String(data.text || '').replace(/[ \t]+\n/g, '\n').trim().slice(0, 15000);
+        if (!text) return fail(new Error('No readable text in this PDF (scanned image?). Try a text PDF.'));
+        logger.info('PDF parsed', { name, pages: data.numpages, chars: text.length });
+        return ok({ text, pages: data.numpages || 0, name });
+      } catch (e) { return fail(e); }
+    });
+
     ipcMain.handle('settings:get', () => ok({ settings: this.store.publicSettings() }));
     ipcMain.handle('settings:save', (_e, patch) => {
-      // Don't overwrite keys with masked placeholders.
+      // Masked placeholders (••••) mean "unchanged" — merge with stored keys by position.
       const clean = JSON.parse(JSON.stringify(patch || {}));
       if (clean.providers) {
         for (const [id, p] of Object.entries(clean.providers)) {
-          if (typeof p.apiKey === 'string' && p.apiKey.startsWith('••••')) delete p.apiKey;
+          const stored = (this.store.settings.providers[id] && this.store.settings.providers[id].apiKeys) || [];
+          if (Array.isArray(p.apiKeys)) {
+            p.apiKeys = p.apiKeys
+              .map((k, i) => ((typeof k === 'string' && k.startsWith('••••')) ? (stored[i] || '') : String(k || '')))
+              .filter((k) => !!k);
+          }
+          if (typeof p.apiKey === 'string') {
+            // legacy single-key payload
+            if (p.apiKey && !p.apiKey.startsWith('••••')) p.apiKeys = (p.apiKeys || []).concat([p.apiKey]);
+            delete p.apiKey;
+          }
         }
       }
       if (clean.stt) {
@@ -516,15 +532,20 @@ class ApplicationController {
       }
       this.store.update(clean);
       this.transcript.setAutoAnswer(this.store.settings.audio.autoAnswer !== false);
+      this.syncTranscriptMode();
       this.transcript.debounceMs = 1400;
       return ok({ settings: this.store.publicSettings() });
     });
     ipcMain.handle('settings:reset-onboarding', () => { this.firstRun.reset(); return ok({}); });
 
-    ipcMain.handle('providers:test', async (_e, { id, config: cfg }) => {
+    ipcMain.handle('providers:test', async (_e, { id, keyIndex, config: cfg }) => {
       try {
         const merged = { ...this.store.getProviderConfig(id), ...(cfg || {}) };
-        // Allow testing a pasted key without saving first.
+        if (!(cfg && cfg.apiKey) && keyIndex != null) {
+          // Test a saved (masked) key by position.
+          const list = merged.apiKeys && merged.apiKeys.length ? merged.apiKeys : (merged.apiKey ? [merged.apiKey] : []);
+          merged.apiKey = list[keyIndex] || '';
+        }
         const r = await testProvider(id, merged);
         return ok({ id, ...r });
       } catch (e) { return fail(e); }

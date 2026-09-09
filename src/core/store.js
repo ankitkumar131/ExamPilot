@@ -1,6 +1,7 @@
 // Persistent user settings (providers, fallback order, audio, stealth...).
-// Lives in the OS userData dir (or ~/.exampilot / EXAMPILOT_DATA_DIR).
+// Lives in the OS user-data dir (or ~/.exampilot / EXAMPILOT_DATA_DIR).
 // API keys are encrypted with Electron safeStorage when available.
+// Each provider holds MULTIPLE keys (apiKeys[]) — auto-rotated on rate limits.
 const fs = require('fs');
 const path = require('path');
 const { getDataDir } = require('./config');
@@ -55,7 +56,7 @@ const ENV_KEY_MAP = {
 
 function defaultProviders() {
   const p = (extra) => Object.assign(
-    { enabled: false, apiKey: '', model: '', baseUrl: '' }, extra || {}
+    { enabled: false, apiKeys: [], model: '', baseUrl: '' }, extra || {}
   );
   return {
     openai: p({ model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' }),
@@ -74,7 +75,7 @@ function defaultProviders() {
 
 function defaults() {
   return {
-    version: 1,
+    version: 2,
     providers: defaultProviders(),
     // Global fallback chain (first = primary). Reorder in Settings → Fallback.
     fallbackOrder: ['groq', 'gemini', 'openai', 'anthropic', 'deepseek', 'mistral', 'together', 'openrouter', 'azure', 'ollama', 'custom'],
@@ -116,14 +117,6 @@ function deepMerge(base, over) {
   return over === undefined ? base : over;
 }
 
-const SECRET_FIELDS = [
-  ['providers', '*', 'apiKey'],
-  ['stt', 'openaiWhisper', 'apiKey'],
-  ['stt', 'deepgram', 'apiKey'],
-  ['stt', 'assemblyai', 'apiKey'],
-  ['stt', 'azure', 'key'],
-];
-
 class Store {
   constructor(dataDir) {
     this.dataDir = dataDir || getDataDir();
@@ -159,8 +152,16 @@ class Store {
   decryptInPlace(obj) {
     try {
       for (const id of Object.keys(obj.providers || {})) {
-        if (obj.providers[id] && obj.providers[id].apiKey !== undefined) {
-          obj.providers[id].apiKey = decSecret(obj.providers[id].apiKey);
+        const p = obj.providers[id];
+        if (Array.isArray(p.apiKeys)) {
+          p.apiKeys = p.apiKeys.map(decSecret).filter(Boolean);
+        } else if (p.apiKey !== undefined) {
+          // v1 migration: single apiKey string → apiKeys array.
+          const v = decSecret(p.apiKey);
+          p.apiKeys = v ? [v] : [];
+          delete p.apiKey;
+        } else {
+          p.apiKeys = [];
         }
       }
       const s = obj.stt || {};
@@ -173,8 +174,14 @@ class Store {
 
   encryptInPlace(obj) {
     for (const id of Object.keys(obj.providers || {})) {
-      if (obj.providers[id] && typeof obj.providers[id].apiKey === 'string') {
-        obj.providers[id].apiKey = encSecret(obj.providers[id].apiKey);
+      const p = obj.providers[id];
+      if (Array.isArray(p.apiKeys)) {
+        p.apiKeys = p.apiKeys.filter((k) => k).map(encSecret);
+      } else if (typeof p.apiKey === 'string') {
+        p.apiKeys = p.apiKey ? [encSecret(p.apiKey)] : [];
+        delete p.apiKey;
+      } else {
+        p.apiKeys = [];
       }
     }
     const s = obj.stt || {};
@@ -211,11 +218,16 @@ class Store {
     return '';
   }
 
-  // Effective provider config (stored key wins, env key is fallback).
+  // Effective provider config: apiKeys[] = stored keys (+ env key appended
+  // as last resort). apiKey = first key (primary).
   getProviderConfig(id) {
     const p = this.settings.providers[id] || {};
-    const apiKey = p.apiKey || this.envKeyFor(id) || '';
-    const cfg = { ...p, apiKey };
+    let keys = [];
+    if (Array.isArray(p.apiKeys)) keys = p.apiKeys.filter(Boolean);
+    else if (typeof p.apiKey === 'string' && p.apiKey) keys = [p.apiKey];
+    const env = this.envKeyFor(id);
+    if (env && !keys.includes(env)) keys = keys.concat([env]);
+    const cfg = { ...p, apiKeys: keys, apiKey: keys[0] || '' };
     if (id === 'azure') {
       cfg.resource = p.resource || process.env.AZURE_OPENAI_RESOURCE || '';
       cfg.deployment = p.deployment || process.env.AZURE_OPENAI_DEPLOYMENT || p.model || '';
@@ -249,13 +261,18 @@ class Store {
     return {};
   }
 
-  // Safe copy for the renderer (keys masked).
+  // Safe copy for the renderer (keys masked, positions preserved for merging).
   publicSettings() {
     const clone = JSON.parse(JSON.stringify(this.settings));
     for (const id of Object.keys(clone.providers || {})) {
-      const k = clone.providers[id].apiKey;
-      clone.providers[id].apiKey = k ? '••••••' + String(k).slice(-4) : '';
-      clone.providers[id].hasKey = !!k || !!this.envKeyFor(id);
+      const cp = clone.providers[id];
+      const arr = Array.isArray(cp.apiKeys) ? cp.apiKeys : (cp.apiKey ? [cp.apiKey] : []);
+      cp.apiKeys = arr.filter(Boolean).map((k) => {
+        const s = String(k);
+        return s.startsWith('••••') ? s : '••••••' + s.slice(-4);
+      });
+      delete cp.apiKey;
+      cp.hasKey = cp.apiKeys.length > 0 || !!this.envKeyFor(id);
     }
     const mask = (v) => (v ? '••••••' + String(v).slice(-4) : '');
     if (clone.stt?.openaiWhisper) clone.stt.openaiWhisper.apiKey = mask(clone.stt.openaiWhisper.apiKey);
@@ -272,4 +289,4 @@ function getStore(dataDir) {
   return singleton;
 }
 
-module.exports = { Store, getStore, defaults, SECRET_FIELDS };
+module.exports = { Store, getStore, defaults };

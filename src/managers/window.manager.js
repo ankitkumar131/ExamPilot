@@ -16,7 +16,6 @@ const FILES = {
   sessions: 'sessions.html',
   settings: 'settings.html',
   onboarding: 'onboarding.html',
-  picker: 'picker.html',
 };
 
 class WindowManager {
@@ -27,7 +26,6 @@ class WindowManager {
     this.windows = new Map();
     this.interactive = true;
     this.wasVisibleBeforePanic = false;
-    this.pickerResolve = null;
   }
 
   get uiDir() { return path.join(__dirname, '..', '..', 'ui'); }
@@ -57,7 +55,7 @@ class WindowManager {
     const e = electron();
     if (this.windows.has(name)) return this.windows.get(name);
     const size = this.sizeFor(name);
-    const isOverlayLike = ['overlay', 'response', 'picker'].includes(name);
+    const isOverlayLike = ['overlay', 'response'].includes(name);
     const win = new e.BrowserWindow({
       width: size.width,
       height: size.height,
@@ -164,8 +162,7 @@ class WindowManager {
 
   panicHide() {
     this.wasVisibleBeforePanic = [...this.windows.values()].some((w) => !w.isDestroyed() && w.isVisible());
-    for (const [name, win] of this.windows) {
-      if (name === 'picker') continue;
+    for (const win of this.windows.values()) {
       try { if (!win.isDestroyed() && win.isVisible()) win.hide(); } catch (_) {}
     }
   }
@@ -227,52 +224,6 @@ class WindowManager {
     for (const win of this.windows.values()) {
       if (!win.isDestroyed()) { try { win.webContents.send(channel, payload); } catch (_) {} }
     }
-  }
-
-  // ---- area picker (fullscreen drag-select) ----
-  pickArea() {
-    const e = electron();
-    return new Promise((resolve) => {
-      if (this.pickerResolve) { resolve(null); return; }
-      this.pickerResolve = resolve;
-      let picker = this.get('picker');
-      if (picker && !picker.isDestroyed()) { try { picker.close(); } catch (_) {} this.windows.delete('picker'); }
-      try {
-        const primary = e.screen.getPrimaryDisplay();
-        const { width, height } = primary.size;
-        picker = new e.BrowserWindow({
-          x: 0, y: 0, width, height,
-          show: false, frame: false, transparent: true,
-          backgroundColor: '#00000000', hasShadow: false,
-          resizable: false, minimizable: false, maximizable: false,
-          fullscreenable: false, skipTaskbar: true, alwaysOnTop: true,
-          visibleOnAllWorkspaces: true, focusable: true,
-          webPreferences: { preload: this.preload, nodeIntegration: false, contextIsolation: true },
-        });
-        // Picker must NOT be content-protected (user needs to see screen).
-        try { picker.setContentProtection(false); } catch (_) {}
-        picker.loadFile(path.join(this.uiDir, FILES.picker));
-        picker.on('closed', () => {
-          this.windows.delete('picker');
-          if (this.pickerResolve) { const r = this.pickerResolve; this.pickerResolve = null; r(null); }
-        });
-        this.windows.set('picker', picker);
-        try { picker.setFullScreen(true); } catch (_) {}
-        picker.show();
-        picker.focus();
-      } catch (err) {
-        this.log.warn('Picker failed', { error: err.message });
-        this.pickerResolve = null;
-        resolve(null);
-      }
-    });
-  }
-
-  resolvePicker(rect) {
-    const picker = this.get('picker');
-    if (picker && !picker.isDestroyed()) { try { picker.close(); } catch (_) {} }
-    this.windows.delete('picker');
-    if (this.pickerResolve) { const r = this.pickerResolve; this.pickerResolve = null; r(rect || null); }
   }
 
   destroyAll() {

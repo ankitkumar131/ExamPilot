@@ -11,7 +11,8 @@
   button, input, select, textarea { -webkit-app-region: no-drag; }
   #bar { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid #232b3d; }
   #bar h1 { font-size: 15px; margin: 0; }
-  button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 8px; font-size: 12.5px; padding: 6px 12px; cursor: pointer; }
+  button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 8px; font-size: 12.5px; padding: 6px 12px; cursor: default; }
+  a { cursor: default; }
   button:hover { border-color: #7c3aed; }
   button.primary { background: #7c3aed; border-color: #7c3aed; }
   button.small { font-size: 11.5px; padding: 4px 8px; }
@@ -98,18 +99,29 @@ function toast(msg) {
 function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); }
 
 // ---------- tab renderers ----------
+function keyListOf(p) {
+  if (p && Array.isArray(p.apiKeys) && p.apiKeys.length) return p.apiKeys.slice();
+  if (p && typeof p.apiKey === 'string' && p.apiKey) return [p.apiKey];
+  return [''];
+}
 function renderProviders() {
-  content.innerHTML = '<div class="warn">🔑 Keys are stored encrypted on this device (OS keychain where available) and sent only to the provider you enable. Enable 2+ providers for automatic fallback.</div>' +
+  content.innerHTML = '<div class="warn">🔑 Add <b>multiple keys per provider</b> — they auto-rotate when a key hits rate limits. Keys stay encrypted on this device. Enable 2+ providers for full fallback.</div>' +
     PROVIDER_IDS.map((id) => {
       const p = S.providers[id] || {};
       const info = PROVIDER_INFO[id];
       const keyLink = info.keyUrl ? `<a href="${info.keyUrl}" data-ext="${info.keyUrl}" style="color:#c4b5fd;font-size:11.5px">get key ↗</a>` : '';
+      const keys = keyListOf(p);
+      const keyRows = keys.map((k, i) =>
+        `<div class="keyRow" style="margin-bottom:6px"><input type="password" data-pk="${id}:${i}" value="${esc(k)}" placeholder="key ${i + 1} — sk-…" autocomplete="off"/>` +
+        (keys.length > 1 ? `<button class="small" data-delkey="${id}:${i}" title="Remove this key">✕</button>` : '') + '</div>'
+      ).join('');
+      const keyBlock = `<div style="font-size:11.5px;color:#9aa3b2;margin:8px 0 4px">API keys (auto-rotates)<div style="margin-top:4px">${keyRows}</div><button class="small" data-addkey="${id}" style="margin-top:2px">+ Add another key</button></div>`;
       return `<div class="card"><div class="provHead">
         <input type="checkbox" data-p="${id}" data-f="enabled" ${p.enabled ? 'checked' : ''}/>
         <h3>${info.label}</h3>${keyLink}
-        <span style="margin-left:auto"><button class="small" data-test="${id}">Test</button><span class="testRes" id="tr_${id}"></span></span>
+        <span style="margin-left:auto"><button class="small" data-test="${id}">Test keys</button><span class="testRes" id="tr_${id}"></span></span>
       </div>
-      ${info.needsKey ? `<label class="f">API key<input type="password" data-p="${id}" data-f="apiKey" value="${esc(p.apiKey || '')}" placeholder="sk-…" autocomplete="off"/></label>` : '<p class="hint">No key needed — runs locally / on your endpoint.</p>'}
+      ${info.needsKey ? keyBlock : '<p class="hint">No key needed — runs locally / on your endpoint.</p>' + keyBlock}
       <div class="grid2">
         <label class="f">${id === 'azure' ? 'Deployment' : 'Model'}<input data-p="${id}" data-f="model" value="${esc(p.model || '')}"/></label>
         ${info.hasBase ? `<label class="f">Base URL<input data-p="${id}" data-f="baseUrl" value="${esc(p.baseUrl || '')}"/></label>` : ''}
@@ -119,16 +131,29 @@ function renderProviders() {
       </div>`;
     }).join('');
   content.querySelectorAll('[data-test]').forEach((b) => b.onclick = () => testProvider(b.dataset.test));
+  content.querySelectorAll('[data-addkey]').forEach((b) => b.onclick = () => { collect(); const p = S.providers[b.dataset.addkey]; p.apiKeys = keyListOf(p).concat(['']); renderProviders(); });
+  content.querySelectorAll('[data-delkey]').forEach((b) => b.onclick = () => { collect(); const parts = b.dataset.delkey.split(':'); const p = S.providers[parts[0]]; const ks = keyListOf(p); ks.splice(Number(parts[1]), 1); p.apiKeys = ks.length ? ks : ['']; delete p.apiKey; renderProviders(); });
   content.querySelectorAll('[data-ext]').forEach((a) => a.onclick = (e) => { e.preventDefault(); api.shellOpenExternal(a.dataset.ext); });
 }
 async function testProvider(id) {
   collect();
   const el = document.getElementById('tr_' + id);
-  el.textContent = 'testing…'; el.className = 'testRes';
+  el.textContent = 'saving + testing…'; el.className = 'testRes';
   try {
-    const r = await api.providersTest({ id, config: {} });
-    el.textContent = '✓ ' + (r.text || 'OK').slice(0, 24); el.className = 'testRes ok';
-  } catch (e) { el.textContent = '✗ ' + e.message.slice(0, 60); el.className = 'testRes bad'; }
+    const saved = await api.settingsSave(S); // save first so masked keys test by index
+    S = saved.settings;
+    const total = keyListOf(S.providers[id]).filter(Boolean).length;
+    const res = [];
+    for (let i = 0; i < total; i++) {
+      try { await api.providersTest({ id, keyIndex: i }); res.push(`k${i + 1} ✓`); }
+      catch (e) { res.push(`k${i + 1} ✗`); }
+    }
+    const msg = res.length ? res.join('   ') : 'no keys to test';
+    const cls = 'testRes ' + (res.some((r) => r.includes('✓')) ? 'ok' : 'bad');
+    renderProviders();
+    const el2 = document.getElementById('tr_' + id);
+    if (el2) { el2.textContent = msg; el2.className = cls; }
+  } catch (e) { el.textContent = '✗ ' + e.message.slice(0, 80); el.className = 'testRes bad'; }
 }
 function orderListHTML(list, enabledSet, ns) {
   return list.map((id, i) => {
@@ -231,10 +256,38 @@ function renderSession() {
       <label class="f">Company<input id="dCompany" value="${esc(d.company || '')}"/></label>
       <label class="f">Role<input id="dRole" value="${esc(d.role || '')}"/></label>
     </div>
-    <label class="f">Resume (pasted text)<textarea class="area" id="dResume">${esc(d.resume || '')}</textarea></label>
+    <div class="grid2">
+      <label class="f">Resume PDF → auto-fill<input type="file" id="dResumePdf" accept="application/pdf,.pdf"/></label>
+      <label class="f">JD PDF → auto-fill<input type="file" id="dJdPdf" accept="application/pdf,.pdf"/></label>
+    </div>
+    <p class="hint" id="pdfStat"></p>
+    <label class="f">Resume (pasted text or parsed PDF)<textarea class="area" id="dResume">${esc(d.resume || '')}</textarea></label>
     <label class="f">Job description<textarea class="area" id="dJd">${esc(d.jobDescription || '')}</textarea></label>
     <label style="font-size:13px"><input type="checkbox" id="dSave" ${d.saveTranscript ? 'checked' : ''}/> Save transcripts by default</label>
   </div>`;
+  wirePdf('dResumePdf', 'dResume');
+  wirePdf('dJdPdf', 'dJd');
+}
+function wirePdf(fileId, areaId) {
+  const fi = document.getElementById(fileId);
+  if (!fi) return;
+  fi.onchange = () => {
+    const f = fi.files && fi.files[0];
+    if (!f) return;
+    const stat = document.getElementById('pdfStat');
+    if (stat) stat.textContent = `Parsing ${f.name}…`;
+    const rd = new FileReader();
+    rd.onload = async () => {
+      try {
+        const b64 = String(rd.result).split(',')[1] || '';
+        const r = await api.documentParsePdf({ name: f.name, base64: b64 });
+        document.getElementById(areaId).value = r.text || '';
+        if (stat) stat.textContent = `✓ ${f.name}: ${r.pages || '?'} pages, ${(r.text || '').length} chars loaded. Press Save all.`;
+        toast('PDF loaded — press Save all');
+      } catch (e) { if (stat) stat.textContent = '✗ ' + e.message; }
+    };
+    rd.readAsDataURL(f);
+  };
 }
 function renderAbout() {
   content.innerHTML = `<div class="card"><h3>ExamPilot v0.1.0</h3>
@@ -256,7 +309,16 @@ function collect() {
   content.querySelectorAll('[data-p]').forEach((el) => {
     const p = S.providers[el.dataset.p];
     if (!p) return;
+    if (el.dataset.f === 'apiKey') return; // legacy single-key field retired; keys use data-pk
     p[el.dataset.f] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  content.querySelectorAll('[data-pk]').forEach((el) => {
+    const parts = el.dataset.pk.split(':');
+    const p = S.providers[parts[0]];
+    if (!p) return;
+    if (!Array.isArray(p.apiKeys)) p.apiKeys = [];
+    p.apiKeys[Number(parts[1])] = el.value;
+    delete p.apiKey;
   });
   if (val('llmTimeout') !== undefined) {
     S.llm.timeoutMs = Number(val('llmTimeout')) || 45000;
@@ -295,10 +357,8 @@ function collect() {
 document.getElementById('bSave').onclick = async () => {
   collect();
   try {
-    // Masked keys (••••) mean "unchanged" — strip so main keeps stored ones.
-    for (const id of Object.keys(S.providers)) {
-      if (typeof S.providers[id].apiKey === 'string' && S.providers[id].apiKey.startsWith('••••')) delete S.providers[id].apiKey;
-    }
+    // Masked key entries (••••) mean "unchanged" — main merges them with stored keys by position.
+    for (const id of Object.keys(S.providers)) delete S.providers[id].apiKey;
     const r = await api.settingsSave(S);
     S = r.settings;
     try { await api.shortcutsSave(shortcuts); } catch (_) {}
@@ -306,6 +366,20 @@ document.getElementById('bSave').onclick = async () => {
     toast(api.isDemo ? 'Demo preview — nothing saved' : 'Saved ✓');
     render();
   } catch (e) { toast('Save failed: ' + e.message); }
+};
+document.getElementById('bHide').onclick = () => api.windowHide('settings');
+
+// ---------- init ----------
+(async () => {
+  const r = await api.settingsGet();
+  S = r.settings;
+  try { shortcuts = (await api.shortcutsGet()).shortcuts || {}; } catch (_) { shortcuts = {}; }
+  render();
+})();
+</script>
+</body>
+</html>
+Save failed: ' + e.message); }
 };
 document.getElementById('bHide').onclick = () => api.windowHide('settings');
 

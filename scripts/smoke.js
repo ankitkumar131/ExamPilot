@@ -28,21 +28,28 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     assert(config.get('x.y') === 1, 'set');
   });
 
-  await t('store save/load + provider merge + key masking', () => {
+  await t('store multi-key save/load + legacy migration + masking', () => {
     const { Store } = require('../src/core/store');
     const s = new Store(process.env.EXAMPILOT_DATA_DIR);
     s.set('providers.groq.enabled', true);
-    s.set('providers.groq.apiKey', 'gsk-secret');
-    assert(s.get('providers.groq.apiKey') === 'gsk-secret', 'key roundtrip');
+    s.set('providers.groq.apiKeys', ['gsk-secret-1', 'gsk-secret-2']);
+    assert(s.get('providers.groq.apiKeys').length === 2, 'key roundtrip');
     const s2 = new Store(process.env.EXAMPILOT_DATA_DIR);
     assert(s2.get('providers.groq.enabled') === true, 'persist enabled');
-    assert(s2.get('providers.groq.apiKey') === 'gsk-secret', 'persist key');
+    assert(s2.get('providers.groq.apiKeys')[1] === 'gsk-secret-2', 'persist keys');
     const pub = s2.publicSettings();
-    assert(pub.providers.groq.apiKey.includes('••••'), 'masked');
+    assert(pub.providers.groq.apiKeys.length === 2 && pub.providers.groq.apiKeys[0].includes('••••'), 'masked array');
     process.env.OPENAI_API_KEY = 'env-key-123';
     const cfg = s2.getProviderConfig('openai');
-    assert(cfg.apiKey === 'env-key-123', 'env fallback key');
+    assert(cfg.apiKey === 'env-key-123' && cfg.apiKeys.length === 1, 'env fallback key');
     delete process.env.OPENAI_API_KEY;
+    // legacy v1 single-key file migrates to apiKeys[]
+    const f = path.join(process.env.EXAMPILOT_DATA_DIR, 'settings.json');
+    const raw = JSON.parse(fs.readFileSync(f, 'utf8'));
+    raw.providers.openai = { enabled: true, apiKey: 'legacy-plain', model: 'm', baseUrl: 'http://x' };
+    fs.writeFileSync(f, JSON.stringify(raw));
+    const s3 = new Store(process.env.EXAMPILOT_DATA_DIR);
+    assert(s3.get('providers.openai.apiKeys')[0] === 'legacy-plain', 'legacy migration');
   });
 
   await t('providers registry + wire-format helpers', () => {
@@ -63,33 +70,34 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     assert(P.__test__.geminiDelta({ candidates: [{ content: { parts: [{ text: 'g' }] } }] }) === 'g', 'gemini delta');
   });
 
-  await t('LLM router falls back across providers in order', async () => {
+  await t('LLM router rotates keys then falls back across providers', async () => {
     const { Store } = require('../src/core/store');
     const LLMRouter = require('../src/services/llm/router');
     const store = new Store(process.env.EXAMPILOT_DATA_DIR);
     store.update({
       providers: {
-        groq: { enabled: true, apiKey: 'k', model: 'm', baseUrl: 'http://x' },
-        gemini: { enabled: true, apiKey: 'k', model: 'm', baseUrl: 'http://x' },
-        openai: { enabled: true, apiKey: 'k', model: 'm', baseUrl: 'http://x' },
+        groq: { enabled: true, apiKeys: ['k1', 'k2'], model: 'm', baseUrl: 'http://x' },
+        gemini: { enabled: true, apiKeys: ['k3'], model: 'm', baseUrl: 'http://x' },
+        openai: { enabled: true, apiKeys: ['k4'], model: 'm', baseUrl: 'http://x' },
       },
       fallbackOrder: ['groq', 'gemini', 'openai'],
       llm: { timeoutMs: 5000, maxTokens: 64, temperature: 0, retriesPerProvider: 0 },
     });
     const router = new LLMRouter({ store });
     const calls = [];
-    router._create = (id) => ({
+    router._create = (id, cfg) => ({
       model: 'm', supportsVision: true, isConfigured: () => true,
       chat: async () => {
-        calls.push(id);
-        if (id !== 'openai') throw new Error('HTTP 429: rate limited');
+        calls.push(`${id}:${cfg.apiKey}`);
+        if (cfg.apiKey === 'k1' || cfg.apiKey === 'k2') throw new Error('HTTP 429: rate limited');
+        if (cfg.apiKey === 'k3') throw new Error('HTTP 500: overloaded');
         return { text: 'ANSWER', model: 'm', provider: id };
       },
     });
     const r = await router.complete({ messages: [{ role: 'user', text: 'hi' }] });
     assert(r.text === 'ANSWER' && r.provider === 'openai', 'lands on third provider');
-    assert(calls.join(',') === 'groq,gemini,openai', 'order respected');
-    assert(r.attempts.length === 3, 'attempts recorded');
+    assert(calls.join(',') === 'groq:k1,groq:k2,gemini:k3,openai:k4', 'keys rotate, then providers: ' + calls.join(','));
+    assert(r.attempts.length === 4 && r.attempts[1].key === 2, 'attempts record key numbers');
   });
 
   await t('LLM router errors when nothing configured', async () => {
@@ -117,6 +125,24 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     });
     assert(got.question.includes('rate limiter'), 'auto question payload');
     assert(got.context.includes('Interviewer:'), 'context format');
+    // AUTO mode answers ANY interviewer speech (live transcribe → prompt)
+    const tr2 = new TranscriptService({});
+    tr2.debounceMs = 10;
+    tr2.setMode('auto');
+    const got2 = await new Promise((resolve) => {
+      tr2.on('auto-question', resolve);
+      tr2.add({ speaker: 'interviewer', text: 'So basically our stack is Postgres and Redis' });
+    });
+    assert(got2.context.includes('Postgres'), 'auto mode answers statements too');
+    // Specific modes stay strict (questions only)
+    const tr3 = new TranscriptService({});
+    tr3.debounceMs = 10;
+    tr3.setMode('coding');
+    let fired = false;
+    tr3.on('auto-question', () => { fired = true; });
+    tr3.add({ speaker: 'interviewer', text: 'So basically our stack is Postgres and Redis' });
+    await new Promise((r) => setTimeout(r, 40));
+    assert(!fired, 'strict mode ignores statements');
   });
 
   await t('sessions create/list/end/remove', () => {
@@ -172,7 +198,7 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
       'src/prompts/templates.js',
       'src/managers/window.manager.js', 'src/managers/shortcut.manager.js',
       'ui/overlay.html', 'ui/response.html', 'ui/chat.html', 'ui/sessions.html',
-      'ui/settings.html', 'ui/onboarding.html', 'ui/picker.html',
+      'ui/settings.html', 'ui/onboarding.html',
       'ui/markdown.js', 'ui/demo-mock.js', 'ui/index.html',
     ];
     for (const f of files) assert(fs.existsSync(path.join(ROOT, f)), `missing ${f}`);

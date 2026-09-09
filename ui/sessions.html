@@ -12,14 +12,14 @@
   button, input, select, textarea { -webkit-app-region: no-drag; }
   #bar { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid #232b3d; }
   #bar h1 { font-size: 15px; margin: 0; }
-  button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 8px; font-size: 12.5px; padding: 6px 12px; cursor: pointer; }
+  button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 8px; font-size: 12.5px; padding: 6px 12px; cursor: default; }
   button:hover { border-color: #7c3aed; }
   button.primary { background: #7c3aed; border-color: #7c3aed; }
   input, select, textarea { background: #0d1117; border: 1px solid #2c3549; border-radius: 8px; color: #e6e9f0; font-size: 12.5px; padding: 6px 10px; }
   #search { margin-left: auto; width: 200px; }
   #main { flex: 1; display: flex; min-height: 0; }
   #list { width: 340px; border-right: 1px solid #232b3d; overflow-y: auto; -webkit-app-region: no-drag; }
-  .row { padding: 12px 14px; border-bottom: 1px solid #1c2230; cursor: pointer; }
+  .row { padding: 12px 14px; border-bottom: 1px solid #1c2230; cursor: default; }
   .row:hover, .row.sel { background: #181e2c; }
   .row .t { font-size: 13px; font-weight: 600; }
   .row .m { font-size: 11.5px; color: #9aa3b2; margin-top: 3px; }
@@ -58,6 +58,11 @@
       <select id="nLang"></select>
       <textarea id="nResume" placeholder="Resume (optional — pasted text, used for answers)"></textarea>
       <textarea id="nJd" placeholder="Job description (optional)"></textarea>
+      <div style="grid-column:1/-1;display:flex;gap:14px;font-size:12px;color:#9aa3b2;align-items:center">
+        <label>Resume PDF <input type="file" id="nResumePdf" accept="application/pdf,.pdf"/></label>
+        <label>JD PDF <input type="file" id="nJdPdf" accept="application/pdf,.pdf"/></label>
+        <span id="nPdfStat"></span>
+      </div>
     </div>
     <div class="rowBtns">
       <button id="bCreate" class="primary">Start live session</button>
@@ -154,6 +159,28 @@ document.getElementById('bCreate').onclick = async () => {
   selected = r.session && r.session.id;
   refresh().then(() => { if (selected) showDetail(); });
 };
+function wirePdf(fileId, areaId) {
+  const fi = document.getElementById(fileId);
+  if (!fi) return;
+  fi.onchange = () => {
+    const f = fi.files && fi.files[0];
+    if (!f) return;
+    const stat = document.getElementById('nPdfStat');
+    if (stat) stat.textContent = 'Parsing…';
+    const rd = new FileReader();
+    rd.onload = async () => {
+      try {
+        const b64 = String(rd.result).split(',')[1] || '';
+        const r = await api.documentParsePdf({ name: f.name, base64: b64 });
+        document.getElementById(areaId).value = r.text || '';
+        if (stat) stat.textContent = `✓ ${f.name} loaded (${(r.text || '').length} chars)`;
+      } catch (e) { if (stat) stat.textContent = '✗ ' + e.message; }
+    };
+    rd.readAsDataURL(f);
+  };
+}
+wirePdf('nResumePdf', 'nResume');
+wirePdf('nJdPdf', 'nJd');
 document.getElementById('bHide').onclick = () => api.windowHide('sessions');
 document.getElementById('search').oninput = refresh;
 document.getElementById('fState').onchange = refresh;

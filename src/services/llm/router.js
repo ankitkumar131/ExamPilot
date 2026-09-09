@@ -5,6 +5,7 @@ const { createProvider } = require('./providers');
 const { createServiceLogger } = require('../../core/logger');
 
 const AUTH_RE = /\b(401|403)\b|invalid.*(key|api)|unauthorized|forbidden|authentication/i;
+const RATE_RE = /\b429\b|rate.?limit|quota|insufficient.*(quota|credit|balance)|too many requests/i;
 
 class LLMRouter {
   constructor({ store, config } = {}) {
@@ -43,10 +44,11 @@ class LLMRouter {
     const out = {};
     for (const id of Object.keys(s.providers || {})) {
       try {
-        const inst = this._create(id, this.store.getProviderConfig(id));
-        out[id] = { enabled: !!s.providers[id].enabled, configured: inst.isConfigured(), model: inst.model, vision: inst.supportsVision };
+        const cfg = this.store.getProviderConfig(id);
+        const inst = this._create(id, cfg);
+        out[id] = { enabled: !!s.providers[id].enabled, configured: inst.isConfigured(), model: inst.model, vision: inst.supportsVision, keyCount: (cfg.apiKeys || []).length };
       } catch (e) {
-        out[id] = { enabled: false, configured: false, error: e.message };
+        out[id] = { enabled: false, configured: false, error: e.message, keyCount: 0 };
       }
     }
     return out;
@@ -66,44 +68,52 @@ class LLMRouter {
 
     for (const id of order) {
       const cfg = this.store.getProviderConfig(id);
-      let provider;
-      try {
-        provider = this._create(id, cfg);
-      } catch (e) {
-        attempts.push({ provider: id, ok: false, error: e.message });
-        continue;
-      }
-      for (let a = 0; a < tries; a++) {
-        if (onAttempt) { try { onAttempt({ provider: id, model: provider.model, attempt: a + 1 }); } catch (_) {} }
-        this.log.info('LLM attempt', { task, provider: id, model: provider.model, attempt: a + 1 });
-        const ctrl = new AbortController();
-        this._cancel = ctrl;
-        const timer = setTimeout(() => ctrl.abort(new Error(`timeout after ${timeout}ms`)), timeout);
+      const keys = ((cfg.apiKeys && cfg.apiKeys.length ? cfg.apiKeys : [cfg.apiKey]) || []).filter(Boolean);
+      if (!keys.length) continue;
+      let providerFailed = false; // non-key error → skip remaining keys, go to next provider
+      for (let ki = 0; ki < keys.length && !providerFailed; ki++) {
+        const key = keys[ki];
+        let provider;
         try {
-          const r = await provider.chat({
-            messages, images,
-            signal: ctrl.signal,
-            maxTokens: maxTokens || llmCfg.maxTokens || 2048,
-            temperature: temperature ?? llmCfg.temperature ?? 0.4,
-            onToken,
-          });
-          clearTimeout(timer);
-          this._cancel = null;
-          attempts.push({ provider: id, ok: true, model: provider.model });
-          this.log.info('LLM success', { task, provider: id, chars: (r.text || '').length });
-          return { text: r.text || '', provider: id, model: provider.model, attempts };
+          provider = this._create(id, { ...cfg, apiKey: key });
         } catch (e) {
-          clearTimeout(timer);
-          if (this._cancel === ctrl) this._cancel = null;
-          lastErr = e;
-          const msg = String((e && e.message) || e);
-          attempts.push({ provider: id, ok: false, error: msg });
-          this.log.warn('LLM attempt failed, falling back', { task, provider: id, error: msg });
-          if (AUTH_RE.test(msg)) break; // bad key → don't retry same provider
-          if (/cancelled/i.test(msg)) {
-            const err = new Error('Request cancelled');
-            err.attempts = attempts;
-            throw err;
+          attempts.push({ provider: id, key: ki + 1, ok: false, error: e.message });
+          continue;
+        }
+        for (let a = 0; a < tries; a++) {
+          if (onAttempt) { try { onAttempt({ provider: id, model: provider.model, attempt: a + 1, key: ki + 1, keys: keys.length }); } catch (_) {} }
+          this.log.info('LLM attempt', { task, provider: id, model: provider.model, key: `${ki + 1}/${keys.length}`, attempt: a + 1 });
+          const ctrl = new AbortController();
+          this._cancel = ctrl;
+          const timer = setTimeout(() => ctrl.abort(new Error(`timeout after ${timeout}ms`)), timeout);
+          try {
+            const r = await provider.chat({
+              messages, images,
+              signal: ctrl.signal,
+              maxTokens: maxTokens || llmCfg.maxTokens || 2048,
+              temperature: temperature ?? llmCfg.temperature ?? 0.4,
+              onToken,
+            });
+            clearTimeout(timer);
+            this._cancel = null;
+            attempts.push({ provider: id, key: ki + 1, ok: true, model: provider.model });
+            this.log.info('LLM success', { task, provider: id, key: ki + 1, chars: (r.text || '').length });
+            return { text: r.text || '', provider: id, model: provider.model, key: ki + 1, attempts };
+          } catch (e) {
+            clearTimeout(timer);
+            if (this._cancel === ctrl) this._cancel = null;
+            lastErr = e;
+            const msg = String((e && e.message) || e);
+            attempts.push({ provider: id, key: ki + 1, ok: false, error: msg });
+            this.log.warn('LLM attempt failed, falling back', { task, provider: id, key: ki + 1, error: msg });
+            if (/cancelled/i.test(msg)) {
+              const err = new Error('Request cancelled');
+              err.attempts = attempts;
+              throw err;
+            }
+            if (AUTH_RE.test(msg) || RATE_RE.test(msg)) break; // bad/limited key → try next key
+            providerFailed = true; // outage/network/timeout → try next provider
+            break;
           }
         }
       }

@@ -23,6 +23,7 @@ class TranscriptService extends EventEmitter {
     this.config = config;
     this.segments = [];
     this.autoAnswer = true;
+    this.mode = 'auto'; // interview mode: 'auto' answers everything live
     this.debounceMs = 1400;
     this._timer = null;
     this._seq = 0;
@@ -39,6 +40,7 @@ class TranscriptService extends EventEmitter {
   }
 
   setAutoAnswer(on) { this.autoAnswer = !!on; }
+  setMode(mode) { this.mode = mode || 'auto'; }
 
   add({ speaker, text, provider }) {
     const clean = String(text || '').trim();
@@ -61,15 +63,26 @@ class TranscriptService extends EventEmitter {
 
   maybeAutoAnswer(seg) {
     if (!this.autoAnswer) return;
-    if (seg.speaker !== 'interviewer') return;
-    if (!isQuestionLike(seg.text)) return;
+    const aggressive = this.mode === 'auto';
+    if (aggressive) {
+      // AUTO mode: live-transcribe everything and answer it. Interviewer speech
+      // always triggers; your own speech triggers when it looks like a question
+      // (helps mic-only setups where you repeat the question aloud).
+      const isQ = isQuestionLike(seg.text);
+      if (seg.speaker !== 'interviewer' && !isQ) return;
+      if (String(seg.text || '').trim().length < 8) return;
+    } else {
+      // Specific modes: only answer clear interviewer questions.
+      if (seg.speaker !== 'interviewer') return;
+      if (!isQuestionLike(seg.text)) return;
+    }
     clearTimeout(this._timer);
     this._timer = setTimeout(() => {
       this.emit('auto-question', {
         question: this.latestQuestion(),
         context: this.getContext(),
       });
-    }, this.debounceMs);
+    }, aggressive ? 1000 : this.debounceMs);
   }
 
   forceQuestion() {

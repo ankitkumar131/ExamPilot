@@ -6,7 +6,7 @@ const INVOKE = [
   'audio:start', 'audio:stop', 'audio:status',
   'loopback:get-source',
   'capture:list-displays', 'capture:fullscreen',
-  'picker:pick', 'picker:done',
+  'document:parse-pdf',
   'vision:analyze-last',
   'llm:ask', 'llm:cancel', 'llm:auto-answer', 'llm:mock',
   'transcript:get', 'transcript:clear',
