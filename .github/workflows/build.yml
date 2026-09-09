@@ -24,6 +24,8 @@ jobs:
       - run: npm run smoke
       - name: Build + publish installers
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --win --publish always > eb-win.log 2>&1; code=$?; tail -n 100 eb-win.log; exit $code
       - name: Post log to debug issue
         if: failure()
@@ -51,6 +53,8 @@ jobs:
       - run: npm run smoke
       - name: Build + publish installers
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --linux --publish always > eb-linux.log 2>&1; code=$?; tail -n 100 eb-linux.log; exit $code
       - name: Post log to debug issue
         if: failure()
