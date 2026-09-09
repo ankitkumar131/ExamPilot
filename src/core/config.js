@@ -23,11 +23,11 @@ function getDataDir() {
 const DEFAULTS = {
   app: {
     name: 'ExamPilot',
-    version: '0.1.1',
+    version: '0.1.2',
     processTitle: 'ExamPilot',
   },
   window: {
-    overlay: { width: 660, height: 64 },
+    overlay: { width: 1000, height: 84 },
     response: { width: 880, height: 560 },
     chat: { width: 540, height: 720 },
     sessions: { width: 1020, height: 680 },

@@ -6,18 +6,18 @@
 <script src="./demo-mock.js"></script>
 <style>
   html, body { margin: 0; background: transparent; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-  #pill { -webkit-app-region: drag; display: flex; align-items: center; gap: 6px; background: rgba(13,16,24,.92);
-    border: 1px solid rgba(124,58,237,.45); border-radius: 14px; padding: 8px 10px; color: #e6e9f0;
+  #pill { -webkit-app-region: drag; display: flex; align-items: center; gap: 8px; background: rgba(13,16,24,.92);
+    border: 1px solid rgba(124,58,237,.45); border-radius: 16px; padding: 12px 14px; color: #e6e9f0;
     box-shadow: 0 8px 32px rgba(0,0,0,.5); backdrop-filter: blur(12px); }
   button, select { -webkit-app-region: no-drag; }
-  button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 9px; font-size: 12px;
-    padding: 6px 10px; cursor: default; white-space: nowrap; }
-  button:hover { border-color: #7c3aed; background: #232b3d; }
+  button { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 10px; font-size: 13.5px;
+    padding: 9px 14px; cursor: default; white-space: nowrap; }
+  button .sc { display: block; font-size: 10px; font-weight: 400; opacity: .6; margin-top: 2px; letter-spacing: .2px; }
   button.on { background: #7c3aed; border-color: #7c3aed; color: #fff; }
   button.rec.on { background: #dc2626; border-color: #dc2626; }
   button:disabled { opacity: .45; cursor: default; }
-  select { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 9px; font-size: 11.5px; padding: 5px 6px; max-width: 118px; }
-  #dot { width: 9px; height: 9px; border-radius: 50%; background: #525b70; flex: none; margin-left: 2px; }
+  select { background: #1c2230; color: #e6e9f0; border: 1px solid #2c3549; border-radius: 10px; font-size: 12.5px; padding: 8px 8px; max-width: 132px; }
+  #dot { width: 10px; height: 10px; border-radius: 50%; background: #525b70; flex: none; margin-left: 2px; }
   #dot.live { background: #22c55e; box-shadow: 0 0 8px #22c55e; animation: pulse 1.6s infinite; }
   #dot.busy { background: #f59e0b; box-shadow: 0 0 8px #f59e0b; }
   @keyframes pulse { 50% { opacity: .5; } }
@@ -40,17 +40,17 @@
 <body>
 <div id="pill">
   <span id="dot" title="status"></span>
-  <button id="bRec" class="rec" title="Start/stop listening (Alt+R)">● Listen</button>
-  <button id="bAnswer" title="Force answer from transcript (Ctrl+Shift+A)">Answer</button>
-  <button id="bShot" title="Auto screenshot + analyze (Ctrl+Shift+S)">◧ Shot</button>
-  <button id="bChat" title="Chat (Ctrl+Shift+C)">💬</button>
-  <button id="bSess" title="Sessions (Ctrl+Shift+D)">🗂</button>
+  <button id="bRec" class="rec" title="Start/stop listening (Alt+R)"><span class="lab">● Listen</span><span class="sc" data-sc="mic"></span></button>
+  <button id="bAnswer" title="Force answer from transcript (Ctrl+Shift+A)"><span class="lab">Answer</span><span class="sc" data-sc="answer"></span></button>
+  <button id="bShot" title="Auto screenshot + analyze (Ctrl+Shift+S)"><span class="lab">◧ Shot</span><span class="sc" data-sc="screenshot"></span></button>
+  <button id="bChat" title="Chat (Ctrl+Shift+C)"><span class="lab">💬</span><span class="sc" data-sc="chat"></span></button>
+  <button id="bSess" title="Sessions (Ctrl+Shift+D)"><span class="lab">🗂</span><span class="sc" data-sc="sessions"></span></button>
   <button id="bAuto" class="on" title="Auto-answer interview questions">Auto</button>
   <select id="selMode" title="Interview mode"></select>
   <select id="selLang" title="Coding language"></select>
   <button id="bPanel" title="Show/hide live transcript">≡</button>
-  <button id="bSet" title="Settings (Ctrl+,)">⚙</button>
-  <button id="bHide" title="Hide (Ctrl+Shift+H)">–</button>
+  <button id="bSet" title="Settings (Ctrl+,)"><span class="lab">⚙</span><span class="sc" data-sc="settings"></span></button>
+  <button id="bHide" title="Hide (Ctrl+Shift+H)"><span class="lab">–</span><span class="sc" data-sc="panic"></span></button>
 </div>
 <div id="panel" class="hidden">
   <div id="status"><span id="statusText">Idle — press Listen or take a screenshot.</span><span id="prov"></span></div>
@@ -99,7 +99,7 @@ function setPanel(open) {
 function layoutOverlay() {
   if (!api.windowResize || api.isDemo) return;
   const docVisible = !$('docbar').classList.contains('hidden');
-  const h = 64 + (panelOpen ? 236 : 0) + (docVisible ? 104 : 0);
+  const h = 84 + (panelOpen ? 236 : 0) + (docVisible ? 104 : 0);
   try { api.windowResize({ name: 'overlay', width: 660, height: h }); } catch (_) {}
 }
 function paintDoctor() {
@@ -224,6 +224,19 @@ async function toggleListen() {
     listening = false; paintListen(); setStatus('Stopped.', '');
   }
 }
+function fmtShortcut(s) {
+  const mod = /mac/i.test(navigator.platform || '') ? '\u2318' : 'Ctrl';
+  return String(s || '').replace(/CommandOrControl/g, mod);
+}
+async function paintShortcuts() {
+  let map = null;
+  try { map = (await api.shortcutsGet()).shortcuts || null; } catch (_) {}
+  const fallback = { mic: 'Alt+R', answer: 'Ctrl+Shift+A', screenshot: 'Ctrl+Shift+S', chat: 'Ctrl+Shift+C', sessions: 'Ctrl+Shift+D', settings: 'Ctrl+,', panic: 'Ctrl+Shift+H' };
+  document.querySelectorAll('[data-sc]').forEach((el) => {
+    const v = (map && map[el.dataset.sc]) || fallback[el.dataset.sc] || '';
+    el.textContent = fmtShortcut(v);
+  });
+}
 let heardTimer = null;
 function pulseHeard() {
   try {
@@ -234,7 +247,8 @@ function pulseHeard() {
 }
 function paintListen() {
   $('bRec').classList.toggle('on', listening);
-  $('bRec').textContent = listening ? '■ Stop' : '● Listen';
+  const lab = $('bRec').querySelector('.lab');
+  if (lab) lab.textContent = listening ? '■ Stop' : '● Listen';
 }
 async function saveModeLang() {
   try { await api.settingsSave({ sessionDefaults: { mode: modeSel.value, language: langSel.value } }); } catch (_) {}
@@ -302,6 +316,7 @@ try {
   try {
     const st = await api.appGetStatus();
     listening = !!st.listening; paintListen();
+    paintShortcuts();
     autoAnswer = st.autoAnswer !== false;
     $('bAuto').classList.toggle('on', autoAnswer);
     const sg = await api.settingsGet();

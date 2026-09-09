@@ -1,6 +1,6 @@
 {
   "name": "exampilot",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "ExamPilot — invisible real-time interview copilot. Listens to mic + system audio, captures screen, answers with your AI providers + automatic fallback.",
   "main": "main.js",
   "author": "ExamPilot",

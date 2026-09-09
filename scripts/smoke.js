@@ -319,6 +319,21 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     assert(fs.existsSync(path.join(ROOT, 'src/stt-worker/bundle-entry.mjs')), 'bundle entry');
   });
 
+  await t('no hover effects, default cursor, overlay shortcuts (static)', () => {
+    const names = ['overlay', 'response', 'chat', 'sessions', 'settings', 'onboarding', 'index'];
+    const htmls = names.map((n) => fs.readFileSync(path.join(ROOT, `ui/${n}.html`), 'utf8'));
+    htmls.forEach((h, i) => {
+      assert(!/:hover/.test(h), `no :hover in ui/${names[i]}.html`);
+      assert(!/cursor:\s*pointer/.test(h), `no pointer cursor in ui/${names[i]}.html`);
+    });
+    const overlay = htmls[0];
+    for (const k of ['mic', 'answer', 'screenshot', 'chat', 'sessions', 'settings', 'panic']) {
+      assert(overlay.includes(`data-sc="${k}"`), `overlay shows ${k} shortcut`);
+    }
+    assert(overlay.includes('paintShortcuts'), 'shortcut painter present');
+    assert(fs.readFileSync(path.join(ROOT, 'src/core/config.js'), 'utf8').includes('overlay: { width: 1000, height: 84 }'), 'overlay enlarged');
+  });
+
   await t('required files exist', () => {
     const files = [
       'main.js', 'preload.js', 'package.json',

@@ -222,7 +222,7 @@ First launch opens the **onboarding wizard**: pick a provider, paste a key, Test
 git clone https://github.com/ankitkumar131/exam.git
 cd exam
 npm install
-npm run smoke     # self-test: 21 checks, no keys needed
+npm run smoke     # self-test: 22 checks, no keys needed
 npm start         # launch (dev: npm run dev)
 ```
 
@@ -324,7 +324,7 @@ src/services/notes.service.js   post-call AI notes
 src/prompts/templates.js        12 interview modes + mock interviewer
 src/managers/                   stealth windows + global shortcuts
 ui/                             overlay, response, chat, sessions, settings, onboarding
-scripts/smoke.js                21-check self-test (works with zero deps installed)
+scripts/smoke.js                22-check self-test (works with zero deps installed)
 ```
 
 ---
