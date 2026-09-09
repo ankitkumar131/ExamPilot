@@ -9,8 +9,8 @@
     "node": ">=18"
   },
   "scripts": {
-    "start": "env -u ELECTRON_RUN_AS_NODE electron .",
-    "dev": "env -u ELECTRON_RUN_AS_NODE electron . --no-sandbox --disable-gpu",
+    "start": "electron .",
+    "dev": "electron . --no-sandbox --disable-gpu",
     "smoke": "node scripts/smoke.js",
     "test": "node scripts/smoke.js",
     "clean": "rm -rf dist/",

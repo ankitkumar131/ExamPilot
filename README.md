@@ -43,6 +43,19 @@ npm run smoke         # zero-dependency self-test
 npm start             # launch (dev: npm run dev)
 ```
 
+> **Windows users:** skip `setup.sh` (it's bash — needs Git Bash) and just run the three
+> commands above in CMD/PowerShell. If your npm version blocks install scripts with
+> `install-scripts ... electron@... (postinstall: node install.js)`, allow + rebuild once:
+>
+> ```bat
+> npm install-scripts approve electron
+> npm rebuild electron
+> npx electron --version
+> ```
+>
+> The `deprecated` / `vulnerabilities` warnings during install come from electron-builder's
+> dependency tree — they're harmless. Do **not** run `npm audit fix --force` (it breaks the build).
+
 On first launch the onboarding wizard asks for **one** API key (free: Gemini / Groq),
 tests it, and you're live. Add more providers anytime in **Settings → Providers**.
 
