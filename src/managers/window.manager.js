@@ -91,10 +91,14 @@ class WindowManager {
   get(name) { return this.windows.get(name); }
 
   // ---- stealth ----
+  // Taskbar/dock hiding is ALWAYS on: ExamPilot never appears in the Windows
+  // taskbar, Linux dock/taskbar, or macOS dock, and creates no tray icon —
+  // it is only visible in Task Manager / System Monitor. The stealth toggle
+  // controls screen-share invisibility (content protection) only.
   applyStealthTo(win, on) {
     if (!win || win.isDestroyed()) return;
     try { win.setContentProtection(on); } catch (_) { /* linux/no-op */ }
-    try { win.setSkipTaskbar(on); } catch (_) {}
+    try { win.setSkipTaskbar(true); } catch (_) {} // always hidden
     try { win.setAlwaysOnTop(true); } catch (_) {}
     try { win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch (_) {
       try { win.setVisibleOnAllWorkspaces(true); } catch (_) {}
@@ -107,14 +111,11 @@ class WindowManager {
   applyStealthAll(on) {
     for (const win of this.windows.values()) this.applyStealthTo(win, on);
     const e = electron();
-    // Dock visibility (macOS).
+    // macOS dock is always hidden — windows return via global shortcut.
     try {
-      if (e && e.app && e.app.dock) {
-        if (on) e.app.dock.hide();
-        else e.app.dock.show();
-      }
+      if (e && e.app && e.app.dock) e.app.dock.hide();
     } catch (_) {}
-    this.log.info(`Stealth ${on ? 'ENABLED' : 'DISABLED'}`, { windows: this.windows.size });
+    this.log.info(`Share-protection ${on ? 'ENABLED' : 'DISABLED'} (taskbar/dock always hidden)`, { windows: this.windows.size });
   }
 
   // ---- visibility ----

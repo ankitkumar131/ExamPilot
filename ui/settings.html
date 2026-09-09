@@ -231,9 +231,9 @@ function renderAudio() {
 function renderStealth() {
   const s = S.stealth;
   content.innerHTML = `
-    <div class="warn">Stealth hides ExamPilot from Meet / Zoom / Teams screen-shares (content protection), the taskbar and the dock. Turn it OFF for practice so you can share your screen normally.</div>
+    <div class="warn">ExamPilot NEVER appears in the taskbar, dock, or system tray (only in Task Manager / System Monitor) — that is always on and cannot be disabled. The toggle below controls screen-share invisibility only. Turn it OFF for practice so you can share normally.</div>
     <div class="card"><h3>Stealth mode</h3>
-      <label style="font-size:13px"><input type="checkbox" id="stEn" ${s.enabled ? 'checked' : ''}/> Enable stealth (recommended for live calls)</label>
+      <label style="font-size:13px"><input type="checkbox" id="stEn" ${s.enabled ? 'checked' : ''}/> Hide from Meet / Zoom / Teams screen-share (recommended for live calls)</label>
       <label class="f">Disguised process name<input id="stName" value="${esc(s.disguiseName)}"/></label>
       <label style="font-size:13px"><input type="checkbox" id="stShare" ${s.hideOnShare ? 'checked' : ''}/> Extra protection while screen-sharing (content protection always on in stealth)</label>
       <p class="hint">Panic key instantly hides every window — see Shortcuts tab.</p>
