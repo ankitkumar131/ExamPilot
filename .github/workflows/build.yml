@@ -8,6 +8,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: write
+  issues: write
+
 jobs:
   build-win:
     runs-on: windows-latest
@@ -18,9 +22,17 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npm run smoke
-      - run: npx electron-builder --win --publish always
+      - name: Build + publish installers
+        shell: bash
+        run: npx electron-builder --win --publish always > eb-win.log 2>&1; code=$?; tail -n 100 eb-win.log; exit $code
+      - name: Post log to debug issue
+        if: failure()
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tail -n 120 eb-win.log > eb-win-tail.log
+          gh issue create --title "[ci-debug] win build log" --body-file eb-win-tail.log || true
       - uses: actions/upload-artifact@v4
         with:
           name: exampilot-win
@@ -37,9 +49,17 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npm run smoke
-      - run: npx electron-builder --linux --publish always
+      - name: Build + publish installers
+        shell: bash
+        run: npx electron-builder --linux --publish always > eb-linux.log 2>&1; code=$?; tail -n 100 eb-linux.log; exit $code
+      - name: Post log to debug issue
+        if: failure()
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tail -n 120 eb-linux.log > eb-linux-tail.log
+          gh issue create --title "[ci-debug] linux build log" --body-file eb-linux-tail.log || true
       - uses: actions/upload-artifact@v4
         with:
           name: exampilot-linux
