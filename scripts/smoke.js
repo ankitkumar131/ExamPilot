@@ -228,12 +228,105 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     assert(chat.includes('Transcription failed'), 'chat surfaces STT errors');
   });
 
+  await t('doctor flags missing pieces with fixes', async () => {
+    const { runDoctor } = require('../src/services/doctor');
+    const fakeStore = { getSttConfig: (id) => (id === 'whisper-builtin' ? { enabled: true, model: 'tiny.en' } : { enabled: false }) };
+    const rep = await runDoctor({
+      store: fakeStore, routerStatus: {},
+      worker: { bundleExists: true, cached: false, loaded: false },
+      spawnCheck: async () => ({ ok: false }), mic: null,
+    });
+    assert(!rep.ok, 'unhealthy');
+    const byId = Object.fromEntries(rep.checks.map((c) => [c.id, c]));
+    assert(byId.providers.fix === 'open-settings:providers', 'provider fix');
+    assert(byId['stt-builtin'].fix === 'download-model', 'builtin fix');
+    assert(byId['stt-overall'].fix === 'download-model', 'overall fix');
+    assert(byId['stt-cli'].ok && byId['stt-cloud'].ok, 'optionals pass');
+  });
+
+  await t('doctor passes when healthy', async () => {
+    const { runDoctor } = require('../src/services/doctor');
+    const fakeStore = { getSttConfig: (id) => (id === 'whisper-builtin' ? { enabled: true, model: 'tiny.en' } : { enabled: false }) };
+    const rep = await runDoctor({
+      store: fakeStore, routerStatus: { groq: { enabled: true, configured: true } },
+      worker: { bundleExists: true, cached: true, loaded: false },
+      spawnCheck: async () => ({ ok: false }), mic: { state: 'granted' },
+    });
+    assert(rep.ok, 'healthy: ' + JSON.stringify(rep.checks.filter((c) => !c.ok)));
+  });
+
+  await t('store v3 migration adds built-in engine first', () => {
+    const { Store } = require('../src/core/store');
+    const f = path.join(process.env.EXAMPILOT_DATA_DIR, 'settings.json');
+    fs.writeFileSync(f, JSON.stringify({ version: 2, providers: {}, stt: { order: ['whisper-local'], whisperLocal: { enabled: true } } }));
+    const s3 = new Store(process.env.EXAMPILOT_DATA_DIR);
+    assert(s3.get('stt.order')[0] === 'whisper-builtin', 'builtin first: ' + s3.get('stt.order').join(','));
+    assert(s3.get('version') === 3, 'version bumped');
+    assert(s3.getSttConfig('whisper-builtin').model === 'tiny.en', 'builtin defaults');
+  });
+
+  await t('STT router uses injected built-in worker', async () => {
+    const { Store } = require('../src/core/store');
+    const { STTRouter } = require('../src/services/stt');
+    const store = new Store(process.env.EXAMPILOT_DATA_DIR);
+    store.update({ stt: { order: ['whisper-builtin', 'whisper-local'], whisperBuiltin: { enabled: true, model: 'tiny.en' }, whisperLocal: { enabled: false } } });
+    const seen = [];
+    const r = new STTRouter({ store, builtin: { transcribe: async () => ({ text: 'hello world', provider: 'whisper-builtin' }) } });
+    assert(r.resolveOrder()[0] === 'whisper-builtin', 'builtin first in order');
+    const out = await r.transcribe(Buffer.alloc(3200), { onAttempt: (a) => seen.push(a.provider) });
+    assert(out.text === 'hello world' && out.provider === 'whisper-builtin', 'worker text');
+    assert(seen.join() === 'whisper-builtin', 'attempt hook');
+  });
+
+  await t('worker client converts WAV PCM16 to float32', async () => {
+    const { SttWorkerClient } = require('../src/services/stt-worker');
+    const { wavEncode } = require('../src/services/audio.service');
+    let got = null;
+    const client = new SttWorkerClient({
+      windows: {
+        get: () => ({ isDestroyed: () => false }),
+        send: (_n, _ch, job) => {
+          got = job;
+          setImmediate(() => client.onEvent('done', { id: job.id, ok: true, text: 'hi', model: job.model }));
+        },
+      },
+    });
+    const pcm = Buffer.alloc(320);
+    for (let i = 0; i < 160; i++) pcm.writeInt16LE(i % 2 ? 16384 : -16384, i * 2);
+    const r = await client.transcribe(wavEncode(pcm), 'tiny.en', 5000);
+    assert(r.text === 'hi' && r.provider === 'whisper-builtin', 'roundtrip');
+    assert(got.samples instanceof Float32Array && got.samples.length === 160, 'float32 samples');
+    assert(Math.abs(got.samples[0] - -0.5) < 1e-6 && Math.abs(got.samples[1] - 0.5) < 1e-6, 'sample values');
+  });
+
+  await t('built-in worker wiring present (static)', () => {
+    const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+    const preload = fs.readFileSync(path.join(ROOT, 'preload.js'), 'utf8');
+    const overlay = fs.readFileSync(path.join(ROOT, 'ui/overlay.html'), 'utf8');
+    const settings = fs.readFileSync(path.join(ROOT, 'ui/settings.html'), 'utf8');
+    const wm = fs.readFileSync(path.join(ROOT, 'src/managers/window.manager.js'), 'utf8');
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    assert(main.includes("ipcMain.handle('doctor:fix'") && main.includes('maybeAutoDownloadModel'), 'main doctor');
+    assert(main.includes("ipcMain.handle('stt-builtin:ensure'"), 'main ensure');
+    assert(preload.includes("'doctor:fix'") && preload.includes("'stt-worker:job'"), 'preload channels');
+    assert(preload.includes('sendSttWorkerEvent') && preload.includes('sendDoctorMic'), 'preload senders');
+    assert(overlay.includes('id="docbar"') && overlay.includes('onDoctorStatus'), 'overlay banner');
+    assert(settings.includes('id="wbDl"') && settings.includes('id="docList"'), 'settings ui');
+    assert(wm.includes("'stt-worker'"), 'worker window registered');
+    assert(pkg.scripts['bundle:worker'] && pkg.scripts.prestart, 'bundle scripts');
+    assert(pkg.dependencies['@xenova/transformers'], 'transformers dep');
+    assert(fs.existsSync(path.join(ROOT, 'ui/stt-worker.html')), 'worker page');
+    assert(fs.existsSync(path.join(ROOT, 'src/stt-worker/bundle-entry.mjs')), 'bundle entry');
+  });
+
   await t('required files exist', () => {
     const files = [
       'main.js', 'preload.js', 'package.json',
       'src/core/config.js', 'src/core/logger.js', 'src/core/store.js', 'src/core/first-run.js',
       'src/services/llm/providers.js', 'src/services/llm/router.js',
       'src/services/stt.js', 'src/services/audio.service.js', 'src/services/capture.service.js',
+      'src/services/doctor.js', 'src/services/stt-worker.js', 'src/stt-worker/bundle-entry.mjs',
+      'scripts/bundle-stt-worker.js', 'ui/stt-worker.html',
       'src/services/transcript.service.js', 'src/services/session.service.js', 'src/services/notes.service.js',
       'src/prompts/templates.js',
       'src/managers/window.manager.js', 'src/managers/shortcut.manager.js',
@@ -251,7 +344,7 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
         if (e.name === 'node_modules' || e.name === 'dist' || e.name === '.git') continue;
         const p = path.join(dir, e.name);
         if (e.isDirectory()) out = out.concat(walk(p));
-        else if (e.name.endsWith('.js')) out.push(p);
+        else if (e.name.endsWith('.js') || e.name.endsWith('.mjs')) out.push(p);
       }
       return out;
     };

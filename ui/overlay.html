@@ -29,6 +29,12 @@
   .line { margin: 3px 0; line-height: 1.45; }
   .line b.you { color: #7dd3fc; } .line b.iv { color: #f0abfc; }
   #err { color: #fca5a5; font-size: 12px; margin-top: 6px; display: none; }
+  #docbar { margin-top: 8px; background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.45); border-radius: 12px;
+    padding: 9px 12px; color: #fcd34d; font-size: 12.5px; backdrop-filter: blur(12px); }
+  #docbar.hidden { display: none; }
+  #docbar .row { display: flex; align-items: center; gap: 8px; }
+  #docbar button { font-size: 11.5px; padding: 4px 10px; }
+  #docProg { font-size: 11.5px; color: #9aa3b2; margin-top: 4px; min-height: 15px; }
 </style>
 </head>
 <body>
@@ -51,6 +57,7 @@
   <div id="lines"></div>
   <div id="err"></div>
 </div>
+<div id="docbar" class="hidden"><div class="row"><span id="docText"></span><span style="margin-left:auto;display:flex;gap:6px"><button id="bDocFix">Fix</button><button id="bDocHide" title="Dismiss">–</button></span></div><div id="docProg"></div></div>
 
 <script>
 const api = window.electronAPI || window.DemoMock;
@@ -62,6 +69,7 @@ MODES.forEach(([v, l]) => { const o = document.createElement('option'); o.value 
 LANGS.forEach((v) => { const o = document.createElement('option'); o.value = v; o.textContent = v; langSel.appendChild(o); });
 
 let listening = false, autoAnswer = true, panelOpen = false;
+let doctor = null, docDismissed = false, docBusy = false;
 const linesEl = $('lines'), statusText = $('statusText'), provEl = $('prov'), errEl = $('err'), dot = $('dot');
 
 function setErr(msg, sticky) {
@@ -86,8 +94,32 @@ function setPanel(open) {
   panelOpen = open;
   $('panel').classList.toggle('hidden', !open);
   $('bPanel').classList.toggle('on', open);
-  if (api.windowResize && !api.isDemo) api.windowResize({ name: 'overlay', width: 660, height: open ? 300 : 64 });
+  layoutOverlay();
 }
+function layoutOverlay() {
+  if (!api.windowResize || api.isDemo) return;
+  const docVisible = !$('docbar').classList.contains('hidden');
+  const h = 64 + (panelOpen ? 236 : 0) + (docVisible ? 104 : 0);
+  try { api.windowResize({ name: 'overlay', width: 660, height: h }); } catch (_) {}
+}
+function paintDoctor() {
+  const bar = $('docbar');
+  const failed = doctor && !doctor.ok ? (doctor.checks || []).filter((c) => !c.ok) : [];
+  if (!failed.length || docDismissed) { bar.classList.add('hidden'); layoutOverlay(); return; }
+  const first = failed.find((c) => c.fix) || failed[0];
+  $('docText').textContent = `Setup: ${first.detail} (${failed.length} issue${failed.length > 1 ? 's' : ''})`;
+  const fixB = $('bDocFix');
+  fixB.style.display = first.fix ? '' : 'none';
+  fixB.onclick = async () => {
+    if (docBusy) return; docBusy = true; fixB.textContent = '…';
+    try { await api.doctorFix(first.fix); }
+    catch (e) { setErr('Fix failed: ' + e.message); }
+    docBusy = false; fixB.textContent = 'Fix';
+  };
+  bar.classList.remove('hidden');
+  layoutOverlay();
+}
+$('bDocHide').onclick = () => { docDismissed = true; paintDoctor(); };
 
 // ---------- capture engine (mic + system loopback → PCM16@16k → main) ----------
 const WORKLET_SRC = `
@@ -243,8 +275,29 @@ if (api.onAnswerError) api.onAnswerError((e) => {
   setErr(e.error || 'Answer failed'); setStatus(listening ? 'Listening…' : 'Idle.', listening ? 'live' : '');
 });
 if (api.onListeningChanged) api.onListeningChanged((s) => { if (s && typeof s.listening === 'boolean' && s.listening !== listening && api.isDemo) { listening = s.listening; paintListen(); } });
+if (api.onDoctorStatus) api.onDoctorStatus((rep) => {
+  if (!rep) return;
+  const sig = (rep.checks || []).filter((c) => !c.ok).map((c) => c.id).join(',');
+  if (sig !== paintDoctor._sig) { paintDoctor._sig = sig; docDismissed = false; }
+  doctor = rep; paintDoctor();
+});
+if (api.onSttBuiltinProgress) api.onSttBuiltinProgress((p) => {
+  if (!p) return;
+  const el = $('docProg');
+  if (p.status === 'ready') { if (el) el.textContent = ''; setStatus(listening ? 'Listening…' : 'Model ready ✓', listening ? 'live' : ''); return; }
+  const mb = (n) => (Number(n || 0) / 1048576).toFixed(0);
+  const t = p.total ? `Downloading speech model… ${String(p.file || '').split('/').pop()} ${mb(p.loaded)}/${mb(p.total)} MB` : 'Downloading speech model…';
+  if (el) el.textContent = t;
+  setStatus(t, 'busy');
+});
 
 // ---------- init ----------
+// Report mic permission for the Setup Doctor (Doctor re-checks on each run).
+try {
+  if (navigator.permissions && navigator.permissions.query && api.sendDoctorMic && !api.isDemo) {
+    navigator.permissions.query({ name: 'microphone' }).then((r) => { try { api.sendDoctorMic(r.state); } catch (_) {} }).catch(() => {});
+  }
+} catch (_) {}
 (async () => {
   try {
     const st = await api.appGetStatus();
@@ -255,6 +308,10 @@ if (api.onListeningChanged) api.onListeningChanged((s) => { if (s && typeof s.li
     const d = sg.settings.sessionDefaults || {};
     if (d.mode) modeSel.value = d.mode;
     if (d.language) langSel.value = d.language;
+    try {
+      const dr = await api.doctorStatus();
+      if (dr && dr.doctor) { doctor = dr.doctor; paintDoctor(); }
+    } catch (_) {}
     const tg = await api.transcriptGet();
     (tg.segments || []).slice(-6).forEach(addLine);
     if ((tg.segments || []).length) setPanel(true);

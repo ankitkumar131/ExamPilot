@@ -7,8 +7,9 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { createServiceLogger } = require('../core/logger');
 
-const STT_IDS = ['whisper-local', 'openai-whisper', 'deepgram', 'assemblyai', 'azure'];
+const STT_IDS = ['whisper-builtin', 'whisper-local', 'openai-whisper', 'deepgram', 'assemblyai', 'azure'];
 const STT_LABELS = {
+  'whisper-builtin': 'Whisper (built-in, offline)',
   'whisper-local': 'Whisper (local CLI)',
   'openai-whisper': 'Whisper (OpenAI API)',
   deepgram: 'Deepgram',
@@ -171,8 +172,9 @@ async function transcribeAzure(wavBuffer, cfg, timeoutMs) {
 }
 
 class STTRouter {
-  constructor({ store } = {}) {
+  constructor({ store, builtin } = {}) {
     this.store = store;
+    this.builtin = builtin || null;
     this.log = createServiceLogger('STT');
     this.timeoutMs = 90000;
   }
@@ -182,11 +184,17 @@ class STTRouter {
     const order = s.order && s.order.length ? s.order : STT_IDS;
     return order.filter((id) => {
       const c = this.store.getSttConfig(id);
+      if (id === 'whisper-builtin') return c.enabled !== false;
       if (id === 'whisper-local') return c.enabled !== false;
       if (id === 'openai-whisper') return c.enabled && !!c.apiKey;
       if (id === 'azure') return c.enabled && !!c.key && !!c.region;
       return c.enabled && !!c.apiKey;
     });
+  }
+
+  async transcribeBuiltin(wavBuffer, cfg) {
+    if (!this.builtin || !this.builtin.transcribe) throw new Error('Built-in speech engine unavailable (worker not attached).');
+    return this.builtin.transcribe(wavBuffer, (cfg && cfg.model) || 'tiny.en');
   }
 
   async transcribe(wavBuffer, { onAttempt } = {}) {
@@ -198,7 +206,8 @@ class STTRouter {
       if (onAttempt) { try { onAttempt({ provider: id }); } catch (_) {} }
       try {
         let r;
-        if (id === 'whisper-local') r = await transcribeWhisperLocal(wavBuffer, cfg);
+        if (id === 'whisper-builtin') r = await this.transcribeBuiltin(wavBuffer, cfg);
+        else if (id === 'whisper-local') r = await transcribeWhisperLocal(wavBuffer, cfg);
         else if (id === 'openai-whisper') r = await transcribeOpenAIWhisper(wavBuffer, cfg, this.timeoutMs);
         else if (id === 'deepgram') r = await transcribeDeepgram(wavBuffer, cfg, this.timeoutMs);
         else if (id === 'assemblyai') r = await transcribeAssemblyAI(wavBuffer, cfg, this.timeoutMs);

@@ -33,6 +33,7 @@ const DEFAULTS = {
     sessions: { width: 1020, height: 680 },
     settings: { width: 940, height: 700 },
     onboarding: { width: 640, height: 760 },
+    'stt-worker': { width: 10, height: 10 },
   },
   llm: {
     timeoutMs: 45000,

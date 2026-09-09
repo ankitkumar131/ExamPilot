@@ -16,6 +16,7 @@ const FILES = {
   sessions: 'sessions.html',
   settings: 'settings.html',
   onboarding: 'onboarding.html',
+  'stt-worker': 'stt-worker.html',
 };
 
 class WindowManager {
@@ -35,7 +36,7 @@ class WindowManager {
   async init({ showOverlay = true } = {}) {
     const e = electron();
     if (!e) throw new Error('WindowManager requires Electron');
-    for (const name of ['overlay', 'response', 'chat', 'sessions', 'settings', 'onboarding']) {
+    for (const name of ['overlay', 'response', 'chat', 'sessions', 'settings', 'onboarding', 'stt-worker']) {
       this.create(name);
     }
     this.applyStealthAll(this.stealthOn());

@@ -85,6 +85,7 @@ const PROVIDER_INFO = {
 };
 const PROVIDER_IDS = Object.keys(PROVIDER_INFO);
 const STT_INFO = {
+  'whisper-builtin': 'Whisper built-in (auto, offline)',
   'whisper-local': 'Whisper CLI (offline, free)',
   'openai-whisper': 'Whisper via API (OpenAI/Groq endpoint)',
   deepgram: 'Deepgram', assemblyai: 'AssemblyAI', azure: 'Azure Speech',
@@ -168,7 +169,7 @@ function renderFallback() {
   content.innerHTML = `
     <div class="card"><h3>Answer fallback chain</h3><p class="hint">First reachable provider answers. On any failure (rate limit, outage, timeout) the next one takes over automatically. Disabled providers are skipped.</p>
       <div id="fbList">${orderListHTML(S.fallbackOrder, enabled, 'fb')}</div></div>
-    <div class="card"><h3>Speech-to-text fallback chain</h3><p class="hint">First working engine transcribes each utterance. Local Whisper is free/offline; cloud engines need keys (Audio & Speech tab).</p>
+    <div class="card"><h3>Speech-to-text fallback chain</h3><p class="hint">First working engine transcribes each utterance. Built-in Whisper is automatic + offline; CLI and cloud need setup (Audio & Speech tab).</p>
       <div id="sttList">${orderListHTML(S.stt.order, null, 'stt')}</div></div>
     <div class="card"><h3>Generation defaults</h3><div class="grid3">
       <label class="f">Timeout (ms)<input id="llmTimeout" type="number" value="${S.llm.timeoutMs}"/></label>
@@ -188,6 +189,7 @@ function renderFallback() {
 }
 function renderAudio() {
   const a = S.audio, st = S.stt;
+  const wb = st.whisperBuiltin || { enabled: true, model: 'tiny.en' };
   content.innerHTML = `
     <div class="card"><h3>Capture sources</h3><p class="hint">Mic = your voice · System = interviewer via call audio loopback (Windows: automatic · Linux: needs monitor source below · macOS: limited).</p>
       <label style="font-size:13px;margin-right:16px"><input type="checkbox" id="srcMic" ${a.sources.includes('mic') ? 'checked' : ''}/> Microphone</label>
@@ -201,6 +203,14 @@ function renderAudio() {
       <label class="f">Min speech (ms)<input id="vMin" type="number" value="${a.vad.minUtteranceMs}"/></label>
       <label class="f">Max utterance (ms)<input id="vMax" type="number" value="${a.vad.maxUtteranceMs}"/></label>
     </div></div>
+    <div class="card"><h3>Built-in Whisper (auto, offline) ⭐</h3><p class="hint">Zero-install speech: one-time free download, then works offline forever. No Python, no keys. <span id="wbStat">checking…</span></p>
+      <label style="font-size:13px;margin-right:16px"><input type="checkbox" id="wbEn" ${wb.enabled ? 'checked' : ''}/> Enabled</label>
+      <div class="grid2"><label class="f">Model<select id="wbModel">
+        <option value="tiny.en" ${wb.model === 'tiny.en' ? 'selected' : ''}>tiny.en — English, fastest</option>
+        <option value="tiny" ${wb.model === 'tiny' ? 'selected' : ''}>tiny — multilingual, fast</option>
+        <option value="base.en" ${wb.model === 'base.en' ? 'selected' : ''}>base.en — English, more accurate</option>
+      </select></label>
+      <label class="f">Model file<span style="display:block;margin-top:4px"><button class="small" id="wbDl">⬇ Download / update model</button> <span id="wbProg" style="font-size:11.5px;color:#9aa3b2"></span></span></label></div></div>
     <div class="card"><h3>Local Whisper (offline)</h3><p class="hint"><span id="whStat">checking…</span></p>
       <label style="font-size:13px"><input type="checkbox" id="wEn" ${st.whisperLocal.enabled ? 'checked' : ''}/> Enabled</label>
       <div class="grid3"><label class="f">Command<input id="wCmd" value="${esc(st.whisperLocal.command)}"/></label>
@@ -226,6 +236,29 @@ function renderAudio() {
   api.whisperStatus().then((r) => {
     const el = document.getElementById('whStat');
     if (el) el.innerHTML = r.whisper && r.whisper.ok ? '<span class="ok">✓ whisper CLI available</span>' : `<span class="bad">✗ not found (${esc((r.whisper && r.whisper.error) || '')}). Install: pip install openai-whisper</span>`;
+  }).catch(() => {});
+  refreshBuiltinStat();
+  document.getElementById('wbDl').onclick = async () => {
+    const b = document.getElementById('wbDl');
+    b.disabled = true; b.textContent = 'Downloading… see progress below';
+    try {
+      collect();
+      const saved = await api.settingsSave(S); S = saved.settings;
+      await api.sttBuiltinEnsure({ model: S.stt.whisperBuiltin.model });
+      toast('Speech model ready ✓');
+    } catch (e) { toast('Download failed: ' + e.message); }
+    b.disabled = false; b.textContent = '⬇ Download / update model';
+    refreshBuiltinStat();
+  };
+}
+function refreshBuiltinStat() {
+  if (!api.doctorStatus) return;
+  api.doctorStatus().then((r) => {
+    const el = document.getElementById('wbStat');
+    if (!el) return;
+    const c = ((r.doctor && r.doctor.checks) || []).find((x) => x.id === 'stt-builtin');
+    if (!c) { el.textContent = 'status unknown'; return; }
+    el.innerHTML = c.ok ? `<span class="ok">✓ ${esc(c.detail)}</span>` : `<span class="bad">✗ ${esc(c.detail)}</span>`;
   }).catch(() => {});
 }
 function renderStealth() {
@@ -293,7 +326,20 @@ function renderAbout() {
   content.innerHTML = `<div class="card"><h3>ExamPilot v0.1.0</h3>
     <p class="hint">Invisible real-time interview copilot: mic + system listening, screenshots, sessions, AI notes, mock interviews — with every major AI provider + automatic fallback.</p>
     <p class="hint">Use responsibly: only in interviews/calls where assistance is allowed, or for practice. You are responsible for complying with each platform's and employer's policies.</p>
-    <p class="hint">Keys never leave your machine except to the provider you enabled. No telemetry.</p></div>`;
+    <p class="hint">Keys never leave your machine except to the provider you enabled. No telemetry.</p></div>
+    <div class="card"><h3>Setup Doctor</h3><p class="hint">Automatic health check — missing pieces install or link with one click.</p><div id="docList"><p class="hint">checking…</p></div></div>`;
+  if (!api.doctorStatus) return;
+  api.doctorStatus().then((r) => {
+    const el = document.getElementById('docList');
+    if (!el) return;
+    const checks = (r.doctor && r.doctor.checks) || [];
+    el.innerHTML = checks.map((c) => `<div class="orderRow${c.ok ? '' : ' off'}"><span>${c.ok ? '✓' : '✗'}</span><span><b>${esc(c.label)}</b><br><span style="font-size:11.5px;color:#9aa3b2">${esc(c.detail)}${c.hint ? ' ' + esc(c.hint) : ''}</span></span>${c.fix ? `<span class="sp"><button class="small" data-docfix="${esc(c.fix)}">Fix</button></span>` : ''}</div>`).join('') || '<p class="hint">No data.</p>';
+    el.querySelectorAll('[data-docfix]').forEach((b) => b.onclick = async () => {
+      b.disabled = true; b.textContent = '…';
+      try { await api.doctorFix(b.dataset.docfix); } catch (e) { toast('Fix failed: ' + e.message); }
+      renderAbout();
+    });
+  }).catch(() => {});
 }
 function render() {
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === tab));
@@ -335,6 +381,7 @@ function collect() {
     S.audio.vad.minUtteranceMs = Number(val('vMin')) || 400;
     S.audio.vad.maxUtteranceMs = Number(val('vMax')) || 20000;
     S.stt.whisperLocal = { enabled: !!chk('wEn'), command: val('wCmd'), model: val('wModel'), language: val('wLang') };
+    S.stt.whisperBuiltin = { enabled: !!chk('wbEn'), model: val('wbModel') || 'tiny.en' };
     if (!String(val('owKey') || '').startsWith('••••')) S.stt.openaiWhisper.apiKey = val('owKey');
     S.stt.openaiWhisper.enabled = !!chk('owEn'); S.stt.openaiWhisper.model = val('owModel'); S.stt.openaiWhisper.baseUrl = val('owBase');
     if (!String(val('dgKey') || '').startsWith('••••')) S.stt.deepgram.apiKey = val('dgKey');
@@ -369,19 +416,19 @@ document.getElementById('bSave').onclick = async () => {
 };
 document.getElementById('bHide').onclick = () => api.windowHide('settings');
 
-// ---------- init ----------
-(async () => {
-  const r = await api.settingsGet();
-  S = r.settings;
-  try { shortcuts = (await api.shortcutsGet()).shortcuts || {}; } catch (_) { shortcuts = {}; }
-  render();
-})();
-</script>
-</body>
-</html>
-Save failed: ' + e.message); }
-};
-document.getElementById('bHide').onclick = () => api.windowHide('settings');
+// ---------- live events ----------
+if (api.onSttBuiltinProgress) api.onSttBuiltinProgress((p) => {
+  const el = document.getElementById('wbProg');
+  if (el && p) {
+    if (p.status === 'ready') { el.textContent = 'ready ✓'; return; }
+    const mb = (n) => (Number(n || 0) / 1048576).toFixed(0);
+    el.textContent = p.total ? `${String(p.file || '').split('/').pop()} ${mb(p.loaded)}/${mb(p.total)} MB` : 'downloading…';
+  }
+});
+if (api.onDoctorStatus) api.onDoctorStatus(() => { if (tab === 'about') renderAbout(); });
+if (api.onSettingsOpenTab) api.onSettingsOpenTab((m) => {
+  if (m && m.tab) { collect(); tab = m.tab; render(); content.scrollTop = 0; }
+});
 
 // ---------- init ----------
 (async () => {

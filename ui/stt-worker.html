@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<!-- Hidden built-in speech worker (offline Whisper via Transformers.js/WASM).
+     Never shown; driven by main through the stt-worker:job channel. -->
+<html lang="en">
+<head><meta charset="utf-8"/><title>stt-worker</title></head>
+<body>
+<script>
+window.addEventListener('error', (e) => {
+  try {
+    if (window.electronAPI && window.electronAPI.sendSttWorkerEvent) {
+      window.electronAPI.sendSttWorkerEvent('error', { model: '', error: 'worker load: ' + (e.message || 'bundle missing — run npm run bundle:worker') });
+    }
+  } catch (_) {}
+}, true);
+</script>
+<script>
+// Backend guard: Transformers.js sniffs `process.release.name === "node"` to pick its
+// runtime. In Electron renderers that check can misfire and select the (bundled-out)
+// node backend — mask it BEFORE the bundle evaluates so the WASM backend is used.
+try {
+  if (window.process && window.process.release) {
+    try {
+      Object.defineProperty(window.process, 'release', { value: { name: 'electron-renderer' }, configurable: true });
+    } catch (_) {
+      try { window.process.release.name = 'electron-renderer'; } catch (_) {}
+    }
+  }
+} catch (_) {}
+</script>
+<script src="./vendor/stt-bundle.js"></script>
+</body>
+</html>

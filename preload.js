@@ -16,6 +16,7 @@ const INVOKE = [
   'settings:get', 'settings:save', 'settings:reset-onboarding',
   'providers:test', 'providers:status',
   'whisper:status',
+  'doctor:status', 'doctor:fix', 'stt-builtin:ensure',
   'stealth:get', 'stealth:set',
   'window:show', 'window:hide', 'window:toggle-all',
   'window:interactive', 'window:resize', 'window:move',
@@ -25,7 +26,7 @@ const INVOKE = [
   'app:quit',
 ];
 
-const SEND = ['audio:pcm', 'audio:manual-stop'];
+const SEND = ['audio:pcm', 'audio:manual-stop', 'stt-worker:event', 'doctor:mic'];
 
 const ON = [
   'transcript:segment', 'transcript:cleared',
@@ -35,6 +36,7 @@ const ON = [
   'stealth:changed', 'interaction-mode-changed',
   'capture:done', 'capture:error',
   'listening:changed',
+  'stt-worker:job', 'doctor:status', 'stt-builtin:progress', 'settings:open-tab',
 ];
 
 const api = {};
@@ -47,6 +49,12 @@ api.sendPcm = (source, base64) => {
 };
 api.sendManualStop = () => {
   try { ipcRenderer.send('audio:manual-stop'); } catch (_) {}
+};
+api.sendSttWorkerEvent = (channel, payload) => {
+  try { ipcRenderer.send('stt-worker:event', { channel, payload }); } catch (_) {}
+};
+api.sendDoctorMic = (state) => {
+  try { ipcRenderer.send('doctor:mic', { state }); } catch (_) {}
 };
 for (const ch of ON) {
   const key = 'on' + ch.split(':').map((p) => p[0].toUpperCase() + p.slice(1)).join('').replace(/-(\w)/g, (_, c) => c.toUpperCase());

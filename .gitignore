@@ -13,3 +13,5 @@ sessions.json
 __pycache__/
 .vscode/
 .idea/
+# Generated: built-in speech worker bundle (npm run bundle:worker)
+ui/vendor/

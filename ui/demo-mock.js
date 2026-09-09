@@ -21,7 +21,8 @@
     taskRoutes: { answering: [], vision: [], notes: [] },
     llm: { timeoutMs: 45000, maxTokens: 2048, temperature: 0.4, retriesPerProvider: 1 },
     stt: {
-      order: ['whisper-local', 'openai-whisper', 'deepgram', 'assemblyai', 'azure'],
+      order: ['whisper-builtin', 'whisper-local', 'openai-whisper', 'deepgram', 'assemblyai', 'azure'],
+      whisperBuiltin: { enabled: true, model: 'tiny.en' },
       whisperLocal: { enabled: true, command: 'whisper', model: 'small', language: 'auto' },
       openaiWhisper: { enabled: false, apiKey: '', model: 'whisper-1', baseUrl: 'https://api.openai.com/v1' },
       deepgram: { enabled: false, apiKey: '', model: 'nova-2' },
@@ -41,7 +42,7 @@
   const ok = (v) => Promise.resolve(Object.assign({ ok: true }, v || {}));
   window.DemoMock = {
     isDemo: true,
-    sendPcm() {}, sendManualStop() {},
+    sendPcm() {}, sendManualStop() {}, sendSttWorkerEvent() {}, sendDoctorMic() {},
     appGetStatus: () => ok({ listening: false, answering: false, mockMode: false, providers: {}, sttOrder: [], activeSession: demoSessions[0], autoAnswer: true }),
     audioStart: () => ok({}), audioStop: () => ok({}), audioStatus: () => ok({ listening: false }),
     loopbackGetSource: () => ok({ sourceId: null }),
@@ -67,6 +68,7 @@
     settingsResetOnboarding: () => ok({}),
     providersTest: () => ok({ text: 'OK' }), providersStatus: () => ok({ status: {} }),
     whisperStatus: () => ok({ whisper: { ok: false, error: 'demo' } }),
+    doctorStatus: () => ok({ doctor: { ok: true, checks: [] } }), doctorFix: () => ok({ fixed: null }), sttBuiltinEnsure: () => ok({}),
     stealthGet: () => ok({ stealth: demoSettings.stealth }),
     stealthSet: (_p, patch) => ok({ stealth: Object.assign({}, demoSettings.stealth, patch) }),
     windowShow: () => ok({}), windowHide: () => ok({}), windowToggleAll: () => ok({}),
@@ -78,7 +80,7 @@
     appQuit: () => ok({}),
   };
   // on* subscriptions: no-op unsubscribers.
-  ['onTranscriptSegment', 'onTranscriptCleared', 'onAudioStatus', 'onAnswerStart', 'onAnswerChunk', 'onAnswerDone', 'onAnswerError', 'onProviderAttempt', 'onSessionChanged', 'onSessionActiveChanged', 'onStealthChanged', 'onInteractionModeChanged', 'onCaptureDone', 'onCaptureError', 'onListeningChanged'].forEach((k) => {
+  ['onTranscriptSegment', 'onTranscriptCleared', 'onAudioStatus', 'onAnswerStart', 'onAnswerChunk', 'onAnswerDone', 'onAnswerError', 'onProviderAttempt', 'onSessionChanged', 'onSessionActiveChanged', 'onStealthChanged', 'onInteractionModeChanged', 'onCaptureDone', 'onCaptureError', 'onListeningChanged', 'onSttWorkerJob', 'onDoctorStatus', 'onSttBuiltinProgress', 'onSettingsOpenTab'].forEach((k) => {
     window.DemoMock[k] = () => () => {};
   });
   window.addEventListener('DOMContentLoaded', () => {

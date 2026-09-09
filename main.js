@@ -34,6 +34,8 @@ const FirstRunManager = require('./src/core/first-run');
 const LLMRouter = require('./src/services/llm/router');
 const { testProvider } = require('./src/services/llm/providers');
 const { STTRouter, checkWhisperLocal } = require('./src/services/stt');
+const { SttWorkerClient } = require('./src/services/stt-worker');
+const { runDoctor } = require('./src/services/doctor');
 const { AudioService } = require('./src/services/audio.service');
 const captureService = require('./src/services/capture.service');
 const { TranscriptService } = require('./src/services/transcript.service');
@@ -60,7 +62,13 @@ class ApplicationController {
     this.windows = new WindowManager({ config, store: this.store });
     this.shortcuts = new ShortcutManager();
     this.router = new LLMRouter({ store: this.store, config });
-    this.stt = new STTRouter({ store: this.store });
+    this.sttWorker = new SttWorkerClient({ windows: this.windows });
+    this.stt = new STTRouter({
+      store: this.store,
+      builtin: { transcribe: (wav, model) => this.sttWorker.transcribe(wav, model) },
+    });
+    this.micReport = null;
+    this.doctorCache = null;
     this.audio = new AudioService({ store: this.store, config });
     this.transcript = new TranscriptService({ config });
     this.sessions = new SessionService({ dataDir: config.get('app.dataDir'), config });
@@ -112,7 +120,9 @@ class ApplicationController {
     this.registerShortcuts();
     this.setupIpc();
     this.setupServiceEvents();
+    this.setupWorkerEvents();
     this.startAutosave();
+    this.runDoctorAndBroadcast('startup');
   }
 
   setupPermissions() {
@@ -225,28 +235,102 @@ class ApplicationController {
     logger.info('Listening stopped');
   }
 
-  // Pre-flight: warn LOUDLY (never silently) if transcription cannot work.
-  // Listening still starts — STT keys are read per utterance, so the user can
-  // fix Settings → Audio & Speech mid-session and the next utterance works.
+  // Pre-flight: refresh the Setup Doctor so the overlay banner + Settings show
+  // exactly what is missing (never a silent failure).
   async checkSttReady() {
+    try { await this.runDoctorAndBroadcast('preflight'); }
+    catch (e) { logger.warn('STT readiness check failed', { error: e.message }); }
+  }
+
+  // ---------- setup doctor + built-in speech worker ----------
+  setupWorkerEvents() {
+    this.sttWorker.attach(ipcMain);
+    this.sttWorker.on('progress', (pr) => {
+      this.windows.broadcast('stt-builtin:progress', pr);
+    });
+    this.sttWorker.on('status', () => {
+      this.runDoctorAndBroadcast('worker').catch(() => {});
+    });
+  }
+
+  doctorInput() {
+    let bundleExists = false;
+    try { bundleExists = fs.existsSync(path.join(__dirname, 'ui', 'vendor', 'stt-bundle.js')); } catch (_) {}
+    const boot = this.sttWorker.boot || {};
+    return {
+      store: this.store,
+      routerStatus: this.router.status(),
+      worker: {
+        bundleExists,
+        model: boot.model || this.store.getSttConfig('whisper-builtin').model || 'tiny.en',
+        cached: !!boot.cached,
+        loaded: !!boot.loaded,
+        loadError: boot.loadError || this.sttWorker.lastError || '',
+      },
+      spawnCheck: (cmd, args, timeoutMs) => new Promise((resolve) => {
+        const { spawn } = require('child_process');
+        let done = false;
+        const finish = (r) => { if (!done) { done = true; resolve(r); } };
+        try {
+          const child = spawn(cmd, args, { windowsHide: true });
+          const t = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} finish({ ok: false, error: 'timeout' }); }, timeoutMs);
+          child.on('error', (e) => { clearTimeout(t); finish({ ok: false, error: e.message }); });
+          child.on('close', (code) => { clearTimeout(t); finish(code === 0 ? { ok: true } : { ok: false, error: 'exit ' + code }); });
+        } catch (e) { finish({ ok: false, error: e.message }); }
+      }),
+      mic: this.micReport,
+    };
+  }
+
+  async runDoctorAndBroadcast(reason) {
     try {
-      const order = this.stt.resolveOrder();
-      if (!order.length) {
-        this.windows.broadcast('answer:error', { scope: 'stt', error: 'No speech engines configured. Enable local Whisper or add an STT key in Settings → Audio & Speech.' });
-        return;
-      }
-      if (order.length === 1 && order[0] === 'whisper-local') {
-        const r = await checkWhisperLocal(this.store.getSttConfig('whisper-local'));
-        if (!r.ok) {
-          this.windows.broadcast('answer:error', {
-            scope: 'stt',
-            error: `Local Whisper CLI not found (${r.error || 'not on PATH'}). Transcription will fail until you install it (pip install openai-whisper + ffmpeg) or enable a cloud STT engine in Settings → Audio & Speech.`,
-          });
-        }
-      }
+      const rep = await runDoctor(this.doctorInput());
+      this.doctorCache = rep;
+      this.windows.broadcast('doctor:status', { ...rep, reason });
+      this.maybeAutoDownloadModel(rep);
+      return rep;
     } catch (e) {
-      logger.warn('STT readiness check failed', { error: e.message });
+      logger.warn('Doctor failed', { error: e.message });
+      return { ok: false, checks: [] };
     }
+  }
+
+  // Auto-install: if NOTHING can transcribe and the built-in model is missing,
+  // download it immediately (one-time, free) with progress in the overlay.
+  maybeAutoDownloadModel(rep) {
+    try {
+      if (this._autoDl || this.sttWorker.downloadActive) return;
+      const overall = (rep.checks || []).find((c) => c.id === 'stt-overall');
+      const builtin = (rep.checks || []).find((c) => c.id === 'stt-builtin');
+      const bcfg = this.store.getSttConfig('whisper-builtin');
+      if (!overall || overall.ok) return;
+      if (bcfg.enabled === false || !builtin || builtin.fix !== 'download-model') return;
+      let bundle = false;
+      try { bundle = fs.existsSync(path.join(__dirname, 'ui', 'vendor', 'stt-bundle.js')); } catch (_) {}
+      if (!bundle) return;
+      this._autoDl = true;
+      logger.info('Auto-downloading built-in speech model', { model: bcfg.model });
+      this.sttWorker.ensure(bcfg.model || 'tiny.en')
+        .then(() => this.runDoctorAndBroadcast('model-ready'))
+        .catch((e) => logger.warn('Auto model download failed', { error: e.message }))
+        .finally(() => { this._autoDl = false; });
+    } catch (_) {}
+  }
+
+  async performDoctorFix(fix) {
+    if (fix === 'download-model') {
+      const m = this.store.getSttConfig('whisper-builtin').model || 'tiny.en';
+      await this.sttWorker.ensure(m);
+      await this.runDoctorAndBroadcast('model-ready');
+      return 'download-model';
+    }
+    if (fix && fix.startsWith('open-settings')) {
+      const tab = fix.split(':')[1] || 'providers';
+      this.windows.show('settings');
+      this.windows.broadcast('settings:open-tab', { tab });
+      return fix;
+    }
+    return null;
   }
 
   setupServiceEvents() {
@@ -423,6 +507,7 @@ class ApplicationController {
     ipcMain.handle('audio:status', () => ok({ audio: this.audio.status(), listening: this.listening }));
     ipcMain.on('audio:pcm', (_e, { source, data }) => this.audio.ingestPCM(source, data));
     ipcMain.on('audio:manual-stop', () => this.audio.manualStop());
+    ipcMain.on('doctor:mic', (_e, st) => { this.micReport = st || null; });
 
     ipcMain.handle('loopback:get-source', async () => {
       try {
@@ -578,6 +663,7 @@ class ApplicationController {
       this.transcript.setAutoAnswer(this.store.settings.audio.autoAnswer !== false);
       this.syncTranscriptMode();
       this.transcript.debounceMs = 1400;
+      this.runDoctorAndBroadcast('settings');
       return ok({ settings: this.store.publicSettings() });
     });
     ipcMain.handle('settings:reset-onboarding', () => { this.firstRun.reset(); return ok({}); });
@@ -598,6 +684,14 @@ class ApplicationController {
     ipcMain.handle('whisper:status', async () => {
       const r = await checkWhisperLocal(this.store.getSttConfig('whisper-local'));
       return ok({ whisper: r });
+    });
+    ipcMain.handle('doctor:status', async () => ok({ doctor: await this.runDoctorAndBroadcast('manual') }));
+    ipcMain.handle('doctor:fix', async (_e, fix) => ok({ fixed: await this.performDoctorFix(fix) }));
+    ipcMain.handle('stt-builtin:ensure', async (_e, opts) => {
+      const m = (opts && opts.model) || this.store.getSttConfig('whisper-builtin').model || 'tiny.en';
+      await this.sttWorker.ensure(m);
+      this.runDoctorAndBroadcast('model-ready');
+      return ok({ model: m });
     });
 
     ipcMain.handle('stealth:get', () => ok({ stealth: this.store.settings.stealth }));

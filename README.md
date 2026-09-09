@@ -65,6 +65,15 @@ overlay that screen-sharing can't see, in an app that never appears in your task
 - Energy-based voice detection splits speech into utterances — no fixed timers cutting sentences.
 - **Live transcript** with speaker labels streams in the overlay; full history per session.
 - No drivers needed: capture runs on WebAudio inside the overlay window.
+- **Built-in offline speech (no install, no keys):** a Whisper engine runs *inside* the app
+  (WASM) — it downloads once automatically on first launch, then transcribes offline forever.
+
+### 🩺 Setup Doctor (auto-check + auto-install)
+On every launch the app health-checks itself in ~2 seconds: AI providers, speech engines,
+microphone. Anything missing shows as a one-click banner on the overlay — the free offline
+speech model downloads automatically when nothing else can transcribe. (The only thing that
+can't auto-install is AI provider keys — those need a free signup; the Doctor links you there.)
+See it anytime in Settings → About.
 
 ### ✦ Auto Answer
 - **Auto mode:** every piece of interviewer speech is transcribed and answered continuously
@@ -213,7 +222,7 @@ First launch opens the **onboarding wizard**: pick a provider, paste a key, Test
 git clone https://github.com/ankitkumar131/exam.git
 cd exam
 npm install
-npm run smoke     # self-test: 15 checks, no keys needed
+npm run smoke     # self-test: 21 checks, no keys needed
 npm start         # launch (dev: npm run dev)
 ```
 
@@ -303,7 +312,10 @@ both installers to the release (see `.github/workflows/build.yml`).
 main.js / preload.js            Electron main + context-isolated IPC bridge (45 calls, 15 events)
 src/core/                       config, encrypted multi-key store, logger, first-run
 src/services/llm/               11 providers (REST + streaming, no SDKs) + fallback router
-src/services/stt.js             5 speech engines + STT fallback router
+src/services/stt.js             6 speech engines + STT fallback router
+src/services/doctor.js          first-run Setup Doctor (checks + fixes)
+src/services/stt-worker.js      main-side driver for the hidden speech worker
+src/stt-worker/bundle-entry.mjs worker source (esbuild → ui/vendor/, git-ignored)
 src/services/audio.service.js   VAD audio hub (mic + loopback PCM → utterances)
 src/services/capture.service.js fullscreen screenshots (desktopCapturer)
 src/services/transcript.service.js rolling transcript + auto-answer triggers
@@ -312,7 +324,7 @@ src/services/notes.service.js   post-call AI notes
 src/prompts/templates.js        12 interview modes + mock interviewer
 src/managers/                   stealth windows + global shortcuts
 ui/                             overlay, response, chat, sessions, settings, onboarding
-scripts/smoke.js                15-check self-test (works with zero deps installed)
+scripts/smoke.js                21-check self-test (works with zero deps installed)
 ```
 
 ---
@@ -326,7 +338,7 @@ scripts/smoke.js                15-check self-test (works with zero deps install
 | No system audio (Linux) | Set PulseAudio monitor source in Settings → Audio |
 | No system audio (macOS) | OS limitation — use mic, or play call on speakers |
 | `All AI providers failed` | Settings → Providers: enable ≥1, Test keys; check order in Fallback tab |
-| Whisper CLI not found | `pip install openai-whisper` (+ffmpeg), or use a cloud STT engine |
+| Whisper CLI not found | Optional now — the built-in engine covers you; or `pip install openai-whisper` (+ffmpeg) |
 | Listen shows no transcript / AI says "no question provided" | Transcription is failing — the overlay now shows the exact cause. Usually: install Whisper (above) or add a cloud STT key in Settings → Audio & Speech |
 | Overlay lost / behind windows | `Ctrl+Shift+T` re-pins always-on-top; `Ctrl+Shift+H` toggles visibility |
 | Blank/transparent window on Linux | App already forces software rendering; update GPU drivers if it persists |

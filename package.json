@@ -14,17 +14,21 @@
   },
   "scripts": {
     "start": "electron .",
+    "prestart": "node scripts/bundle-stt-worker.js",
     "dev": "electron . --no-sandbox --disable-gpu",
+    "predev": "node scripts/bundle-stt-worker.js",
     "smoke": "node scripts/smoke.js",
     "test": "node scripts/smoke.js",
-    "clean": "rm -rf dist/",
-    "build": "electron-builder",
-    "build:win": "electron-builder --win",
-    "build:linux": "electron-builder --linux",
-    "build:mac": "electron-builder --mac",
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "bundle:worker": "node scripts/bundle-stt-worker.js",
+    "build": "npm run bundle:worker && electron-builder",
+    "build:win": "npm run bundle:worker && electron-builder --win",
+    "build:linux": "npm run bundle:worker && electron-builder --linux",
+    "build:mac": "npm run bundle:worker && electron-builder --mac",
     "rebuild": "npm run clean && npm run build"
   },
   "dependencies": {
+    "@xenova/transformers": "^2.17.2",
     "dotenv": "^16.4.5",
     "pdf-parse": "^1.1.1",
     "winston": "^3.13.0",
@@ -32,7 +36,8 @@
   },
   "devDependencies": {
     "electron": "^29.4.6",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "esbuild": "^0.28.2"
   },
   "build": {
     "appId": "com.exampilot.app",
@@ -47,13 +52,30 @@
       "!.git/**/*",
       "!.github/**/*",
       "!.env*",
-      "!coverage/**/*"
+      "!coverage/**/*",
+      "!src/stt-worker/**/*",
+      "!node_modules/@xenova/**/*",
+      "!node_modules/onnxruntime-web/**/*",
+      "!node_modules/onnxruntime-node*/**/*",
+      "!node_modules/onnxruntime-common/**/*",
+      "!node_modules/sharp/**/*",
+      "!node_modules/@huggingface/**/*"
     ],
     "win": {
       "icon": "assets/icons/icon.ico",
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "sign": null
     },
@@ -67,8 +89,18 @@
     "linux": {
       "icon": "assets/icons/icon.png",
       "target": [
-        { "target": "deb", "arch": ["x64"] },
-        { "target": "AppImage", "arch": ["x64"] }
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "category": "Utility",
       "maintainer": "ExamPilot",
@@ -89,7 +121,22 @@
     },
     "mac": {
       "category": "public.app-category.utilities",
-      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }, { "target": "zip", "arch": ["x64", "arm64"] }]
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
     },
     "publish": {
       "provider": "github",

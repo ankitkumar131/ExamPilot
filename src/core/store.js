@@ -75,7 +75,7 @@ function defaultProviders() {
 
 function defaults() {
   return {
-    version: 2,
+    version: 3,
     providers: defaultProviders(),
     // Global fallback chain (first = primary). Reorder in Settings → Fallback.
     fallbackOrder: ['groq', 'gemini', 'openai', 'anthropic', 'deepseek', 'mistral', 'together', 'openrouter', 'azure', 'ollama', 'custom'],
@@ -83,7 +83,8 @@ function defaults() {
     taskRoutes: { answering: [], vision: [], notes: [] },
     llm: { timeoutMs: 45000, maxTokens: 2048, temperature: 0.4, retriesPerProvider: 1 },
     stt: {
-      order: ['whisper-local', 'openai-whisper', 'deepgram', 'assemblyai', 'azure'],
+      order: ['whisper-builtin', 'whisper-local', 'openai-whisper', 'deepgram', 'assemblyai', 'azure'],
+      whisperBuiltin: { enabled: true, model: 'tiny.en' },
       whisperLocal: { enabled: true, command: 'whisper', model: 'small', language: 'auto' },
       openaiWhisper: { enabled: false, apiKey: '', model: 'whisper-1', baseUrl: 'https://api.openai.com/v1' },
       deepgram: { enabled: false, apiKey: '', model: 'nova-2' },
@@ -131,7 +132,17 @@ class Store {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
       // Decrypt secrets into memory (memory holds plaintext; disk holds ciphertext).
       this.decryptInPlace(raw);
-      return deepMerge(d, raw);
+      const merged = deepMerge(d, raw);
+      // v3 migration: built-in offline engine becomes the first STT fallback.
+      if ((merged.version || 0) < 3) {
+        merged.version = 3;
+        merged.stt = merged.stt || {};
+        const o = Array.isArray(merged.stt.order) ? merged.stt.order.slice() : [];
+        if (!o.includes('whisper-builtin') && merged.stt.whisperBuiltin?.enabled !== false) o.unshift('whisper-builtin');
+        merged.stt.order = o.length ? o : d.stt.order;
+        if (!merged.stt.whisperBuiltin) merged.stt.whisperBuiltin = { enabled: true, model: 'tiny.en' };
+      }
+      return merged;
     } catch (_) {
       return d;
     }
@@ -238,6 +249,12 @@ class Store {
 
   getSttConfig(id) {
     const s = this.settings.stt || {};
+    if (id === 'whisper-builtin') {
+      return {
+        enabled: s.whisperBuiltin?.enabled !== false,
+        model: s.whisperBuiltin?.model || 'tiny.en',
+      };
+    }
     if (id === 'whisper-local') {
       return {
         enabled: s.whisperLocal?.enabled !== false,

@@ -21,6 +21,7 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npm run smoke
+      - run: npm run bundle:worker -- --force
       - name: Build + publish installers
         shell: bash
         env:
@@ -42,6 +43,7 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npm run smoke
+      - run: npm run bundle:worker -- --force
       - name: Build + publish installers
         shell: bash
         env:
